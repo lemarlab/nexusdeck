@@ -131,7 +131,7 @@ private struct RoutingGraph: View {
             }
             // Inputs
             ForEach(Array(MixerChannel.allCases.enumerated()), id: \.offset) { i, ch in
-                node(store.mixer.name(ch), symbol: ch == .mic ? "mic.fill" : ch.columnSymbol).offset(x: 0, y: rowY[i])
+                node(store.mixer.name(ch), symbol: store.mixer.channelIcons[ch.rawValue] != nil ? store.mixer.symbol(ch) : (ch == .mic ? "mic.fill" : ch.columnSymbol)).offset(x: 0, y: rowY[i])
                 fader(store.mixer.mixes[.creator]?.channels[ch]?.level ?? 0).offset(x: 230, y: rowY[i])
             }
             node("Guadagno", text: "\(store.mixer.currentGainDB) dB").offset(x: 75, y: rowY[0])

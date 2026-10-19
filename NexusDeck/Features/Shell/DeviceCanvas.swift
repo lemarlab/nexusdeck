@@ -21,7 +21,7 @@ private enum L {
     static let keyPlate = CGRect(x: 527, y: 100, width: 245, height: 273)
     static let bezel = CGRect(x: 48, y: 87, width: 468, height: 299)
     static let lcd = CGRect(x: 86, y: 122, width: 391, height: 236)
-    static let knobPlate = CGRect(x: 26, y: 405, width: 746, height: 127)
+    static let knobPlate = CGRect(x: 26, y: 398, width: 746, height: 150)
     static let knobCentersX: [CGFloat] = [99, 219, 339, 459, 579, 699]
     static let knobCenterY: CGFloat = 460
     static let fkeyOrigins: [CGPoint] = [CGPoint(x: 545, y: 109), CGPoint(x: 658, y: 109), CGPoint(x: 545, y: 248), CGPoint(x: 658, y: 248)]
@@ -39,20 +39,28 @@ private struct DeviceBody: View {
                 .frame(width: L.device.width, height: L.device.height)
                 .offset(x: L.device.minX, y: L.device.minY)
             // Plates
-            UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 0, bottomTrailingRadius: 14, topTrailingRadius: 14)
-                .fill(Theme.devicePlate)
-                .frame(width: L.screenPlate.width, height: L.screenPlate.height)
-                .offset(x: L.screenPlate.minX, y: L.screenPlate.minY)
-            UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 14, bottomTrailingRadius: 0, topTrailingRadius: 0)
-                .fill(Theme.devicePlate)
-                .frame(width: L.keyPlate.width, height: L.keyPlate.height)
-                .offset(x: L.keyPlate.minX, y: L.keyPlate.minY)
+            // Screen and key plates as one piece: rounded outer corners, concave fillets where they join.
+            Path { p in
+                let s = L.screenPlate, k = L.keyPlate
+                p.move(to: CGPoint(x: s.minX, y: s.minY))
+                p.addArc(tangent1End: CGPoint(x: s.maxX, y: s.minY), tangent2End: CGPoint(x: s.maxX, y: k.minY), radius: 10)
+                p.addArc(tangent1End: CGPoint(x: s.maxX, y: k.minY), tangent2End: CGPoint(x: k.maxX, y: k.minY), radius: 10)
+                p.addLine(to: CGPoint(x: k.maxX, y: k.minY))
+                p.addLine(to: CGPoint(x: k.maxX, y: k.maxY))
+                p.addArc(tangent1End: CGPoint(x: s.maxX, y: k.maxY), tangent2End: CGPoint(x: s.maxX, y: s.maxY), radius: 10)
+                p.addArc(tangent1End: CGPoint(x: s.maxX, y: s.maxY), tangent2End: CGPoint(x: s.minX, y: s.maxY), radius: 10)
+                p.addLine(to: CGPoint(x: s.minX, y: s.maxY))
+                p.closeSubpath()
+            }
+            .fill(Theme.devicePlate)
             if ui.section == .mixer {
-                Rectangle().fill(Theme.devicePlate)
+                // Down to the bottom of the body, following its rounded corners.
+                UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 22, bottomTrailingRadius: 22, topTrailingRadius: 0)
+                    .fill(Theme.devicePlate)
                     .frame(width: L.knobPlate.width, height: L.knobPlate.height)
                     .offset(x: L.knobPlate.minX, y: L.knobPlate.minY)
-                Rectangle().fill(Theme.accent).frame(width: 3, height: L.knobPlate.height).offset(x: L.knobPlate.minX, y: L.knobPlate.minY)
-                Rectangle().fill(Theme.accent).frame(width: 3, height: L.knobPlate.height).offset(x: L.knobPlate.maxX - 3, y: L.knobPlate.minY)
+                Rectangle().fill(Theme.accent).frame(width: 3, height: L.knobPlate.height - 22).offset(x: L.knobPlate.minX, y: L.knobPlate.minY)
+                Rectangle().fill(Theme.accent).frame(width: 3, height: L.knobPlate.height - 22).offset(x: L.knobPlate.maxX - 3, y: L.knobPlate.minY)
             } else {
                 Rectangle().fill(Theme.accent).frame(width: 3, height: L.screenPlate.height).offset(x: L.screenPlate.minX, y: L.screenPlate.minY)
                 Rectangle().fill(Theme.accent).frame(width: 3, height: L.keyPlate.height).offset(x: L.keyPlate.maxX - 3, y: L.keyPlate.minY)
@@ -77,7 +85,7 @@ private struct DeviceBody: View {
             // Knobs
             ForEach(0..<6, id: \.self) { i in
                 KnobView(index: i)
-                    .position(x: L.knobCentersX[i], y: L.knobCenterY + 18)
+                    .position(x: L.knobCentersX[i], y: L.knobCenterY + 10)
             }
             // Mix label
             VStack(spacing: 8) {
@@ -322,11 +330,10 @@ struct KnobView: View {
         let bus: MixBus = store.mixer.dualMix ? store.mixer.activeMix : .creator
         let s = store.mixer.mixes[bus]?.channels[ch] ?? ChannelState()
         let action = store.knob.knobs[index].actionID
-        VStack(spacing: 14) {
+        VStack(spacing: 10) {
             ZStack {
-                // Outer bezel (bottom flattened like the hardware knob)
+                // Outer bezel
                 Circle().fill(Color(hex: "#141414")).frame(width: 90, height: 90)
-                    .mask(Rectangle().frame(width: 90, height: 82).offset(y: -4))
                 // Ring segments: 270° sweep
                 ForEach(0..<20, id: \.self) { seg in
                     let lit = Double(seg) < Double(s.level) / 5
@@ -347,8 +354,7 @@ struct KnobView: View {
                 }
             }
             .overlay(
-                UnevenRoundedRectangle(topLeadingRadius: 48, bottomLeadingRadius: 6, bottomTrailingRadius: 6, topTrailingRadius: 48)
-                    .strokeBorder(selected ? Theme.accent : .clear, lineWidth: 2).frame(width: 98, height: 92).offset(y: -2)
+                Circle().strokeBorder(selected ? Theme.accent : .clear, lineWidth: 2).frame(width: 98, height: 98)
             )
             Text(action.map { ActionCatalog.descriptor($0).title.uppercased() } ?? store.mixer.name(ch))
                 .font(.system(size: 9.5, weight: .regular)).tracking(1.2)

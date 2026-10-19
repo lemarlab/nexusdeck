@@ -76,11 +76,16 @@ final class AppState: ObservableObject {
         started = true
         session = DeviceSession(devices: deviceManager, store: store, deck: deck, audio: audio, engine: engine)
         deviceManager.start()
-        bridge.setSingleMix(!store.mixer.dualMix)
+        bridge.setSingleMix(!store.mixer.dualMix && !store.mixer.obsTracks)
         bridge.start(sampleRate: Double(store.library.device.sampleRate))
         appRouter.start()
+        Updater.shared.checkAtLaunch()
+        appRouter.setVisibility(dualMix: store.mixer.dualMix, obsTracks: store.mixer.obsTracks)
+        appRouter.setNames(store.mixer)
         mixSync = store.objectWillChange.debounce(for: .milliseconds(200), scheduler: RunLoop.main).sink { [self] _ in
-            bridge.setSingleMix(!store.mixer.dualMix)
+            bridge.setSingleMix(!store.mixer.dualMix && !store.mixer.obsTracks)
+            appRouter.setVisibility(dualMix: store.mixer.dualMix, obsTracks: store.mixer.obsTracks)
+            appRouter.setNames(store.mixer)
         }
         softGainSync = store.objectWillChange.debounce(for: .milliseconds(30), scheduler: RunLoop.main).prepend(()).sink { [self] _ in
             let m = store.mixer
@@ -92,6 +97,13 @@ final class AppState: ObservableObject {
                 return v * v
             }
             bridge.setSoftGains(lineIn: gain(.lineIn), console: gain(.console))
+            bridge.setGain(.capSystem, audio.captureGain(.system))
+            bridge.setGain(.capGame, audio.captureGain(.game))
+            bridge.setGain(.capChat, audio.captureGain(.chat))
+            bridge.setGain(.capLineIn, audio.captureGain(.lineIn))
+            bridge.setGain(.capConsole, audio.captureGain(.console))
+            // The Audience mix applies the Line In at step 20: only the knob's share is added here.
+            bridge.setGain(.capLineInHW, m.obsTracks ? audio.captureGain(.lineIn) * 32768 / Float(AudioService.meterGain[20]) : 0)
         }
         engine.startIntegrations()
         SDKHost.shared.start(store: store, deck: deck)

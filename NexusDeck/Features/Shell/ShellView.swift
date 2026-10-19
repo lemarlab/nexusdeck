@@ -130,6 +130,7 @@ struct HeaderBar: View {
     var body: some View {
         HStack(spacing: 0) {
             BrandMark().padding(.leading, 16)
+            UpdateBadge().padding(.leading, 14)
             Spacer()
             if ui.section != .apps {
             Text(label).font(.system(size: 13, weight: .bold)).foregroundStyle(Theme.textMid).padding(.trailing, 10)
@@ -281,6 +282,26 @@ struct HeaderBar: View {
         panel.allowedContentTypes = [.nexusProfile, .json]
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do { try store.importProfile(from: url) } catch { message = "File non valido" }
+    }
+}
+
+/// Shown in the header when a new version is available: opens Settings → General.
+private struct UpdateBadge: View {
+    @ObservedObject var updater = Updater.shared
+    @EnvironmentObject var ui: UIState
+
+    var body: some View {
+        if let v = updater.latestVersion {
+            Button { ui.settingsPage = .general } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.down.circle.fill").font(.system(size: 11, weight: .semibold))
+                    Text("Aggiornamento \(v)").font(.system(size: 11.5, weight: .bold))
+                }
+                .foregroundStyle(.black).padding(.horizontal, 9).frame(height: 22)
+                .background(Theme.accent).clipShape(Capsule())
+            }
+            .buttonStyle(.plain).help("È disponibile una nuova versione di NexusDeck")
+        }
     }
 }
 

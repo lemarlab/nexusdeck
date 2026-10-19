@@ -30,6 +30,8 @@ final class AppAudioRouter: ObservableObject {
         (.system, 3), (.game, 4), (.chat, 5), (.lineIn, 6), (.console, 7),
     ]
     private static let routeSelector: AudioObjectPropertySelector = 0x6E64_7274 // 'ndrt'
+    private static let visibleSelector: AudioObjectPropertySelector = 0x6E64_766D // 'ndvm'
+    private static let namesSelector: AudioObjectPropertySelector = 0x6E64_6E6D // 'ndnm'
     private static let driverBundleID = "com.nexusdeck.lemarlab.AudioPlugIn"
 
     init(store: ProfileStore) { self.store = store }
@@ -65,6 +67,66 @@ final class AppAudioRouter: ObservableObject {
         }
     }
 
+    // MARK: Visible devices
+
+    private var sentMask: UInt32?
+    private var wantedMask: UInt32 = 0xFFFF_FFFF
+
+    /// Publishes only the devices that are in use: Creator/Audience Mix with Dual Mix, the "(OBS)" inputs with
+    /// the OBS tracks mode. Device indices as in the driver's table.
+    func setVisibility(dualMix: Bool, obsTracks: Bool) {
+        var m: UInt32 = 0
+        for i in 2...7 { m |= 1 << i }                       // Chat Mic, System, Game, Chat, Line In, Console
+        if dualMix { m |= 1 << 0 }                            // Creator Mix
+        if dualMix && !obsTracks { m |= 1 << 1 }              // Audience Mix (Line In only in OBS tracks mode)
+        if obsTracks { for i in 16...20 { m |= 1 << i } }     // System/Game/Chat/Line In/Console (OBS)
+        wantedMask = m
+        sendVisibility()
+    }
+
+    private func sendVisibility() {
+        guard sentMask != wantedMask else { return }
+        let plugIn = Self.plugInObject()
+        guard plugIn != 0 else { return }
+        var addr = Self.address(Self.visibleSelector)
+        var num = NSNumber(value: Int64(wantedMask)) as CFNumber
+        let err = withUnsafeMutablePointer(to: &num) {
+            AudioObjectSetPropertyData(plugIn, &addr, 0, nil, UInt32(MemoryLayout<CFNumber>.size), $0)
+        }
+        if err == noErr { sentMask = wantedMask }
+    }
+
+    // MARK: Device names
+
+    private var sentNames: String?
+    private var wantedNames = ""
+
+    /// Renames the Mac devices after the custom channel names (also their "(OBS)" inputs).
+    func setNames(_ mixer: MixerProfile) {
+        let devices: [(MixerChannel, Int, Int)] = [(.system, 3, 16), (.game, 4, 17), (.chat, 5, 18), (.lineIn, 6, 19), (.console, 7, 20)]
+        var lines: [String] = []
+        for (ch, out, cap) in devices {
+            let n = (mixer.channelNames[ch.rawValue] ?? "").trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\n", with: " ")
+            guard !n.isEmpty else { continue }
+            lines.append("\(out)=\(n)")
+            lines.append("\(cap)=\(n)")
+        }
+        wantedNames = lines.joined(separator: "\n")
+        sendNames()
+    }
+
+    private func sendNames() {
+        guard sentNames != wantedNames else { return }
+        let plugIn = Self.plugInObject()
+        guard plugIn != 0 else { return }
+        var addr = Self.address(Self.namesSelector)
+        var str = wantedNames as CFString
+        let err = withUnsafeMutablePointer(to: &str) {
+            AudioObjectSetPropertyData(plugIn, &addr, 0, nil, UInt32(MemoryLayout<CFString>.size), $0)
+        }
+        if err == noErr { sentNames = wantedNames }
+    }
+
     private static func plugInObject() -> AudioObjectID {
         var addr = address(kAudioHardwarePropertyTranslateBundleIDToPlugIn)
         var bid = driverBundleID as CFString
@@ -84,7 +146,7 @@ final class AppAudioRouter: ObservableObject {
             AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &addr, .main) { [weak self] _, _ in
                 MainActor.assumeIsolated {
                     // The device list changes when coreaudiod restarts: the driver forgot the table.
-                    if sel == kAudioHardwarePropertyDevices { self?.sentTable = nil }
+                    if sel == kAudioHardwarePropertyDevices { self?.sentTable = nil; self?.sentMask = nil; self?.sendVisibility(); self?.sentNames = nil; self?.sendNames() }
                     self?.scheduleRefresh()
                 }
             }

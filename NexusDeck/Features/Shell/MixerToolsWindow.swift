@@ -12,7 +12,7 @@ struct MixerToolsWindow: View {
                 HStack(spacing: 22) {
                     tabButton("Instradamento", 0)
                     tabButton("Ducking", 1)
-                    tabButton("Nomi canali", 2)
+                    tabButton("Nomi canali e icone", 2)
                     Spacer()
                 }
                 .padding(.horizontal, 26).frame(height: 36)
@@ -67,7 +67,7 @@ private struct RoutingMatrix: View {
                 ForEach(MixerChannel.allCases) { ch in
                     GridRow {
                         HStack(spacing: 8) {
-                            Image(systemName: ch.columnSymbol).foregroundStyle(Theme.accent)
+                            Image(systemName: store.mixer.symbol(ch)).foregroundStyle(Theme.accent)
                             Text(store.mixer.name(ch)).font(.system(size: 12, weight: .bold))
                         }
                         .frame(width: 140, alignment: .leading)
@@ -180,17 +180,55 @@ private struct ChannelNamesPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Dai un nome a ogni canale (per esempio \"Spotify\" al posto di System). Lascia vuoto per il nome standard.")
+            Text("Dai un nome e un'icona a ogni canale (per esempio \"Music\" al posto di System). Il nome compare in maiuscolo nell'app e come nome del dispositivo sul Mac. Lascia vuoto per il nome standard.")
                 .font(.system(size: 12)).foregroundStyle(Theme.textDim)
             ForEach(MixerChannel.allCases) { ch in
                 HStack(spacing: 14) {
-                    Image(systemName: ch.columnSymbol).foregroundStyle(Theme.accent).frame(width: 18)
+                    IconPicker(selection: Binding(get: { store.mixer.symbol(ch) },
+                                                  set: { store.mixer.channelIcons[ch.rawValue] = $0 == ch.columnSymbol ? nil : $0 }))
                     Text(ch.title).font(.system(size: 12, weight: .bold)).frame(width: 90, alignment: .leading)
                     TextField(ch.title, text: Binding(get: { store.mixer.channelNames[ch.rawValue] ?? "" },
                                                       set: { store.mixer.channelNames[ch.rawValue] = $0.isEmpty ? nil : String($0.prefix(16)) }))
                         .textFieldStyle(.roundedBorder).frame(width: 240)
                 }
             }
+        }
+    }
+}
+
+/// Small icon button that opens a grid of SF Symbols suited to audio sources.
+private struct IconPicker: View {
+    @Binding var selection: String
+    @State private var open = false
+
+    static let symbols = [
+        "music.note", "music.note.list", "headphones", "hifispeaker.fill", "speaker.wave.2.fill", "radio.fill",
+        "gamecontroller.fill", "playstation.logo", "xbox.logo", "display", "desktopcomputer", "laptopcomputer",
+        "tv.fill", "play.rectangle.fill", "film.fill", "mic.fill", "mic.circle.fill", "waveform",
+        "bubble.left.and.bubble.right.fill", "message.fill", "phone.fill", "video.fill", "person.2.fill", "person.wave.2.fill",
+        "bell.fill", "globe", "safari.fill", "guitars.fill", "pianokeys", "smallcircle.filled.circle",
+        "cable.connector", "dot.radiowaves.left.and.right", "antenna.radiowaves.left.and.right", "star.fill", "heart.fill", "bolt.fill",
+    ]
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            Image(systemName: selection).font(.system(size: 14)).foregroundStyle(Theme.accent)
+                .frame(width: 30, height: 26).background(Color.white.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 5))
+        }
+        .buttonStyle(.plain).help("Cambia icona")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(34), spacing: 6), count: 6), spacing: 6) {
+                ForEach(Self.symbols, id: \.self) { s in
+                    Button { selection = s; open = false } label: {
+                        Image(systemName: s).font(.system(size: 15))
+                            .frame(width: 34, height: 30)
+                            .background(s == selection ? Theme.accent.opacity(0.35) : Color.white.opacity(0.06))
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(10)
         }
     }
 }

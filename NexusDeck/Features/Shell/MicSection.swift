@@ -152,25 +152,10 @@ struct MicColumn: View {
 /// Our own drawing of a broadcast microphone on a yoke mount.
 struct MicIllustration: View {
     var body: some View {
-        ZStack {
-            // Yoke
-            Path { p in
-                p.move(to: CGPoint(x: 70, y: 80)); p.addQuadCurve(to: CGPoint(x: 120, y: 30), control: CGPoint(x: 70, y: 20))
-                p.addLine(to: CGPoint(x: 128, y: 20))
-            }
-            .stroke(Color(hex: "#2B2B2D"), style: StrokeStyle(lineWidth: 9, lineCap: .round))
-            // Body
-            Capsule().fill(LinearGradient(colors: [Color(hex: "#3B3B3E"), Color(hex: "#151517")], startPoint: .top, endPoint: .bottom))
-                .frame(width: 120, height: 46)
-                .rotationEffect(.degrees(-28))
-                .offset(x: -8, y: 18)
-            // Grille
-            Ellipse().fill(RadialGradient(colors: [Color(hex: "#444"), Color(hex: "#111")], center: .center, startRadius: 1, endRadius: 22))
-                .overlay(Ellipse().strokeBorder(Color(hex: "#B3261E"), lineWidth: 2))
-                .frame(width: 26, height: 46)
-                .rotationEffect(.degrees(-28))
-                .offset(x: -60, y: 46)
-        }
+        // Studio microphone icon by Icons8 (icons8.com), tinted with the accent colour.
+        Image("MicStudio").renderingMode(.template).resizable().interpolation(.high)
+            .aspectRatio(contentMode: .fit).frame(width: 100, height: 100)
+            .foregroundStyle(Theme.accent)
     }
 }
 

@@ -27,6 +27,9 @@ final class AudioBridge: ObservableObject {
     /// Software channels: no USB channel of their own on the device.
     private static let softBridges = ["NexusDeck.Bridge.LineIn", "NexusDeck.Bridge.Console"]
     private static let outputBridges = ["NexusDeck.Bridge.CreatorMix", "NexusDeck.Bridge.AudienceMix", "NexusDeck.Bridge.ChatMic"]
+    /// Copies of the channels for OBS ("System (OBS)"…): System, Game, Chat, Line In, Console.
+    private static let captureBridges = ["NexusDeck.Bridge.Cap.System", "NexusDeck.Bridge.Cap.Game", "NexusDeck.Bridge.Cap.Chat",
+                                         "NexusDeck.Bridge.Cap.LineIn", "NexusDeck.Bridge.Cap.Console"]
 
     private var aggregate: AudioObjectID = 0
     private var ioProc: AudioDeviceIOProcID?
@@ -36,24 +39,46 @@ final class AudioBridge: ObservableObject {
     private var plan: UnsafeMutablePointer<RoutePlan>?
 
     struct Route { var srcBuffer: Int32; var srcChannel: Int32; var dstBuffer: Int32; var dstChannel: Int32; var gain: Int32 }
-    /// gains: 0 = unity, 1 = Line In, 2 = Console (written by the main thread, read by the IO thread).
+    /// Gain slots, written by the main thread and read by the IO thread.
+    enum Gain: Int32 {
+        case unity = 0, lineIn, console
+        /// OBS copies: they follow the knob and mute of their channel.
+        case capSystem, capGame, capChat, capLineIn, capConsole
+        /// Physical Line In carried by the Audience mix (OBS tracks mode), into "Line In (OBS)".
+        case capLineInHW
+    }
+    static let gainCount = 9
+    static let maxRoutes = 64
     struct RoutePlan {
         var count: Int32
-        var gains: (Float, Float, Float)
-        var routes: (Route, Route, Route, Route, Route, Route, Route, Route, Route, Route, Route, Route, Route, Route, Route, Route)
+        var gains: UnsafeMutablePointer<Float>
+        var routes: UnsafeMutablePointer<Route>
     }
-    private var softGains: (Float, Float) = (1, 1)
+    private var gainValues: [Float] = [1, 1, 1, 1, 1, 1, 1, 1, 0]
 
-    /// Sets the software gain (0…1) of the Line In and Console virtual outputs.
+    /// Sets the software gains (0…1).
+    func setGain(_ slot: Gain, _ value: Float) {
+        gainValues[Int(slot.rawValue)] = value
+        plan?.pointee.gains[Int(slot.rawValue)] = value
+    }
+
     func setSoftGains(lineIn: Float, console: Float) {
-        softGains = (lineIn, console)
-        plan?.pointee.gains.1 = lineIn
-        plan?.pointee.gains.2 = console
+        setGain(.lineIn, lineIn)
+        setGain(.console, console)
     }
 
     static let installedPath = "/Library/Audio/Plug-Ins/HAL/NexusDeckAudio.driver"
 
     var isPlugInInstalled: Bool { FileManager.default.fileExists(atPath: Self.installedPath) }
+
+    /// The installed driver differs from the one bundled with this version of the app.
+    var isPlugInOutdated: Bool {
+        guard isPlugInInstalled, let bundled = Bundle.main.url(forResource: "NexusDeckAudio", withExtension: "driver") else { return false }
+        let bin = "Contents/MacOS/NexusDeckAudio"
+        let a = try? Data(contentsOf: bundled.appendingPathComponent(bin))
+        let b = try? Data(contentsOf: URL(fileURLWithPath: Self.installedPath).appendingPathComponent(bin))
+        return a != nil && a != b
+    }
 
     /// Installs (or updates) the bundled audio plug-in. Requires an administrator password.
     func installPlugIn() -> String? {
@@ -219,7 +244,8 @@ final class AudioBridge: ObservableObject {
         setNominalRate(device(forUID: Self.inputBridges[0]), sampleRate)
 
         let subs: [[String: Any]] = [[kAudioSubDeviceUIDKey: usb]]
-            + (Self.inputBridges + Self.softBridges.filter { device(forUID: $0) != 0 } + Self.outputBridges).map { [kAudioSubDeviceUIDKey: $0, kAudioSubDeviceDriftCompensationKey: 1] }
+            + (Self.inputBridges + Self.softBridges.filter { device(forUID: $0) != 0 } + Self.outputBridges
+               + Self.captureBridges.filter { device(forUID: $0) != 0 }).map { [kAudioSubDeviceUIDKey: $0, kAudioSubDeviceDriftCompensationKey: 1] }
         let desc: [String: Any] = [
             kAudioAggregateDeviceNameKey: "NexusDeck Bridge",
             kAudioAggregateDeviceUIDKey: Self.aggregateUID,
@@ -291,15 +317,35 @@ final class AudioBridge: ObservableObject {
         for pair in 0..<softCount {
             for c in 0..<2 {
                 guard let src = locate(inLayout, usbIn + 6 + pair * 2 + c), let dst = locate(outLayout, c) else { continue }
-                routes.append(Route(srcBuffer: src.0, srcChannel: src.1, dstBuffer: dst.0, dstChannel: dst.1, gain: Int32(pair + 1)))
+                routes.append(Route(srcBuffer: src.0, srcChannel: src.1, dstBuffer: dst.0, dstChannel: dst.1, gain: pair == 0 ? Gain.lineIn.rawValue : Gain.console.rawValue))
             }
         }
+        // OBS copies (after the output bridges): System, Game, Chat, Line In, Console.
+        if Self.captureBridges.allSatisfy({ device(forUID: $0) != 0 }) {
+            let capBase = usbOut + 6
+            func cap(_ srcFlat: Int, _ capIndex: Int, _ gain: Gain) {
+                for c in 0..<2 {
+                    guard let src = locate(inLayout, srcFlat + c), let dst = locate(outLayout, capBase + capIndex * 2 + c) else { continue }
+                    routes.append(Route(srcBuffer: src.0, srcChannel: src.1, dstBuffer: dst.0, dstChannel: dst.1, gain: gain.rawValue))
+                }
+            }
+            cap(usbIn + 0, 0, .capSystem)
+            cap(usbIn + 2, 1, .capGame)
+            cap(usbIn + 4, 2, .capChat)
+            if softCount == 2 {
+                cap(usbIn + 6, 3, .capLineIn)
+                cap(usbIn + 8, 4, .capConsole)
+            }
+            cap(2, 3, .capLineInHW)   // USB input 3-4 = Audience mix
+        }
         let p = UnsafeMutablePointer<RoutePlan>.allocate(capacity: 1)
-        var r = routes
-        let count = r.count
-        while r.count < 16 { r.append(Route(srcBuffer: 0, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0)) }
-        p.initialize(to: RoutePlan(count: Int32(count), gains: (1, softGains.0, softGains.1),
-                                   routes: (r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12], r[13], r[14], r[15])))
+        let rp = UnsafeMutablePointer<Route>.allocate(capacity: Self.maxRoutes)
+        let count = min(routes.count, Self.maxRoutes)
+        for i in 0..<count { (rp + i).initialize(to: routes[i]) }
+        let gp = UnsafeMutablePointer<Float>.allocate(capacity: Self.gainCount)
+        for i in 0..<Self.gainCount { (gp + i).initialize(to: gainValues[i]) }
+        gp[0] = 1
+        p.initialize(to: RoutePlan(count: Int32(count), gains: gp, routes: rp))
         return p
     }
 
@@ -309,8 +355,8 @@ final class AudioBridge: ObservableObject {
         let outs = UnsafeMutableAudioBufferListPointer(output)
         for b in outs { if let d = b.mData { memset(d, 0, Int(b.mDataByteSize)) } }
         let g = plan.pointee.gains
-        withUnsafeBytes(of: plan.pointee.routes) { raw in
-            let routes = raw.bindMemory(to: Route.self)
+        let routes = plan.pointee.routes
+        do {
             for i in 0..<Int(plan.pointee.count) {
                 let r = routes[i]
                 guard Int(r.srcBuffer) < ins.count, Int(r.dstBuffer) < outs.count else { continue }
@@ -319,7 +365,7 @@ final class AudioBridge: ObservableObject {
                 let sStride = Int(sb.mNumberChannels), dStride = Int(db.mNumberChannels)
                 let frames = min(Int(sb.mDataByteSize) / 4 / max(sStride, 1), Int(db.mDataByteSize) / 4 / max(dStride, 1))
                 let sc = Int(r.srcChannel), dc = Int(r.dstChannel)
-                let k: Float = r.gain == 0 ? g.0 : (r.gain == 1 ? g.1 : g.2)
+                let k = g[Int(r.gain)]
                 if k == 0 { continue }
                 for f in 0..<frames { dp[f * dStride + dc] += sp[f * sStride + sc] * k }
             }
@@ -336,7 +382,11 @@ final class AudioBridge: ObservableObject {
         }
         ioProc = nil
         aggregate = 0
-        if let plan { plan.deallocate() }
+        if let plan {
+            plan.pointee.routes.deallocate()
+            plan.pointee.gains.deallocate()
+            plan.deallocate()
+        }
         plan = nil
     }
 }

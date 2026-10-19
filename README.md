@@ -28,7 +28,10 @@ A native macOS app (Swift/SwiftUI) to control the **AX310** mixer / stream deck,
 - **Censor bleep**: hold a key to mute the mic and play a bleep (1 kHz tone or your own sound).
 - **Auto ducking**: music and game are lowered automatically while you speak (adjustable threshold, reduction, release and channels).
 - **Voice effect presets**: one key toggles a combination of reverb, echo and the hardware voice changer.
-- **Custom channel names**: rename channels (e.g. "Spotify" instead of System) in the app and on the panel.
+- **Separate tracks for OBS**: every channel (System, Game, Chat, Line In, Console) is also available as an input device, so in OBS each source can go to its own audio track (e.g. music live but not in the VOD). The physical Line In can be captured on its own too.
+- **Only the devices you use**: Creator/Audience Mix and the OBS inputs appear on the Mac only when Dual Mix / OBS tracks are on. Devices are labelled `[AM-OUT]` (outputs) and `[AM-IN]` (inputs).
+- **Custom channel names and icons**: rename a channel (e.g. "Music" instead of System) and pick its icon; the Mac devices are renamed too.
+- **Built-in updates**: NexusDeck checks GitHub for new versions and updates itself.
 - **Noise gate calibration**: one click measures your room noise and sets the threshold.
 - **Native Discord and Voicemod integrations**: built in and switched on/off, no plug-ins to download.
 - **Native Apple Silicon app**, no Intel/Rosetta components.
@@ -55,11 +58,9 @@ xcodebuild -project NexusDeck.xcodeproj -scheme NexusDeck -configuration Release
 
 The audio driver (`AudioPlugin/`) is built automatically as part of the app build.
 
-To create the DMG:
+## Credits
 
-```sh
-./scripts/make-dmg.sh
-```
+- Studio microphone icon by [Icons8](https://icons8.com).
 
 ## License
 

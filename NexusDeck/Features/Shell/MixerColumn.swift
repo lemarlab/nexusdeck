@@ -22,9 +22,15 @@ struct MixerColumn: View {
                 Text("Mixer audio").font(.system(size: 14, weight: .bold))
                 Spacer()
                 Button { ui.showMixerTools = true } label: {
-                    Image(systemName: "slider.horizontal.3").font(.system(size: 13)).foregroundStyle(Theme.textDim)
+                    HStack(spacing: 5) {
+                        Image(systemName: "slider.horizontal.3").font(.system(size: 11, weight: .semibold))
+                        Text("Strumenti").font(.system(size: 11.5, weight: .bold))
+                    }
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 9).frame(height: 22)
+                    .background(Theme.accent).clipShape(Capsule())
                 }
-                .buttonStyle(.plain).help("Strumenti mixer: instradamento, ducking, nomi canali")
+                .buttonStyle(.plain).help("Strumenti mixer: instradamento, ducking, nomi canali e icone")
                 .padding(.trailing, 10)
                 Button { ui.showRouting = true } label: {
                     Image(systemName: "point.3.filled.connected.trianglepath.dotted").font(.system(size: 13)).foregroundStyle(Theme.textDim)
@@ -36,6 +42,13 @@ struct MixerColumn: View {
             HStack(spacing: 10) {
                 PillToggle(isOn: Binding(get: { store.mixer.dualMix }, set: { audio.setDualMix($0) }))
                 Text("Abilita Dual Mix").font(.system(size: 12.5)).foregroundStyle(Theme.textMid)
+            }
+            .padding(.leading, 15).frame(height: 36)
+            Rectangle().fill(Theme.separator.opacity(0.5)).frame(height: 1)
+            HStack(spacing: 10) {
+                PillToggle(isOn: Binding(get: { store.mixer.obsTracks }, set: { audio.setOBSTracks($0) }))
+                Text("Tracce separate per OBS").font(.system(size: 12.5)).foregroundStyle(Theme.textMid)
+                InfoIcon(text: "In OBS aggiungi come \"Acquisizione ingresso audio\" i dispositivi [AM-IN]: Chat Mic (microfono), System, Game, Chat, Line In, Console. Con questa opzione il Line In fisico arriva su \"[AM-IN] Line In\" (usa il mix Audience). Ogni copia segue la manopola e il muto del suo canale.")
             }
             .padding(.leading, 15).frame(height: 36)
             Rectangle().fill(Theme.separator.opacity(0.5)).frame(height: 1)
@@ -96,7 +109,7 @@ struct ChannelRow: View {
     var body: some View {
         let s = store.mixer.mixes[bus]?.channels[channel] ?? ChannelState()
         HStack(spacing: 0) {
-            Image(systemName: channel.columnSymbol).font(.system(size: 12))
+            Image(systemName: store.mixer.symbol(channel)).font(.system(size: 12))
                 .foregroundStyle(active ? Theme.accent : Theme.text).frame(width: 18)
                 .padding(.leading, 26)
             Text(store.mixer.name(channel)).font(.system(size: 11.5, weight: .bold)).foregroundStyle(Theme.textMid).lineLimit(1)

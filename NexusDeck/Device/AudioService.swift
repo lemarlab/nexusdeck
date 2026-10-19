@@ -31,6 +31,11 @@ final class AudioService: ObservableObject {
         guard let c = controller else { return }
         let p = store.mixer
         for bus in MixBus.allCases {
+            if bus == .audience && p.obsTracks {
+                // OBS tracks mode: only the Line In, at full level (its knob is applied to the OBS copy).
+                c.send(AXProtocol.mixerVolumes(mixer: 1, values: [0, AXProtocol.mixerVolumeMax, 0, 0, 0, 0]))
+                continue
+            }
             let mix = p.mixes[p.dualMix ? bus : .creator] ?? MixState()
             let values = MixerChannel.allCases.map { ch -> Int in
                 let s = mix.channels[ch] ?? ChannelState()
@@ -39,7 +44,7 @@ final class AudioService: ObservableObject {
             c.send(AXProtocol.mixerVolumes(mixer: bus.rawValue, values: values))
         }
         c.send(AXProtocol.mixerMutes(muteMasks()))
-        c.send(AXProtocol.knobControl(mixer: p.dualMix ? p.activeMix.rawValue : 0, linked: !p.dualMix))
+        c.send(AXProtocol.knobControl(mixer: p.dualMix && !p.obsTracks ? p.activeMix.rawValue : 0, linked: !p.dualMix && !p.obsTracks))
         // The monitor overrides the mic volume in some mixes: re-apply it after the volumes.
         applyMic()
         if ducked { applyDucking() }
@@ -85,6 +90,7 @@ final class AudioService: ObservableObject {
                 if mix.muted || (mix.channels[ch]?.muted ?? false) || !p.isRouted(ch, to: out) { m |= 1 << i }
             }
             if bus == .creator ? !hearsMic : !micInStream { m |= 1 }
+            if bus == .audience && p.obsTracks { m = 0x3F & ~(1 << 1) }
             masks.append(m)
         }
         masks.append(micInChatMix ? 0 : 1)
@@ -165,7 +171,8 @@ final class AudioService: ObservableObject {
         guard let c = controller else { return }
         let p = store.mixer
         let d = p.ducking
-        let buses: [MixBus] = d.streamOnly ? [.audience] : (p.dualMix ? MixBus.allCases : [.creator, .audience])
+        var buses: [MixBus] = d.streamOnly ? [.audience] : (p.dualMix ? MixBus.allCases : [.creator, .audience])
+        if p.obsTracks { buses = [.creator] }
         var cmds: [AXProtocol.Command] = []
         for name in d.channels {
             guard let ch = MixerChannel(rawValue: name), ch != .mic, let index = MixerChannel.allCases.firstIndex(of: ch) else { continue }
@@ -359,7 +366,8 @@ final class AudioService: ObservableObject {
         let target: MixBus = store.mixer.dualMix ? bus : .creator
         store.mixer.mixes[target, default: MixState()].channels[ch, default: ChannelState()].level = l
         let mix = store.mixer.mixes[target] ?? MixState()
-        let hwBuses: [MixBus] = store.mixer.dualMix ? [bus] : MixBus.allCases
+        var hwBuses: [MixBus] = store.mixer.dualMix ? [bus] : MixBus.allCases
+        if store.mixer.obsTracks { hwBuses.removeAll { $0 == .audience } }
         for b in hwBuses {
             controller?.send(AXProtocol.mixerVolume(mixer: b.rawValue, channel: MixerChannel.allCases.firstIndex(of: ch)!, value: Self.hw(l * mix.level / 100)))
         }
@@ -391,6 +399,21 @@ final class AudioService: ObservableObject {
     func setMonitor(_ ch: MixerChannel, bus: MixBus, _ on: Bool) {
         store.mixer.micMonitor = on
         applyMic()
+    }
+
+    func setOBSTracks(_ on: Bool) {
+        store.mixer.obsTracks = on
+        if on { store.mixer.activeMix = .creator }
+        applyMixer()
+    }
+
+    /// Gain (0…1) of a channel's OBS copy: follows its knob, mute and stream routing like the mixer does.
+    func captureGain(_ ch: MixerChannel) -> Float {
+        let p = store.mixer
+        let mix = p.mixes[p.dualMix && !p.obsTracks ? .audience : .creator] ?? MixState()
+        let c = mix.channels[ch] ?? ChannelState()
+        if c.muted || mix.muted || (!p.obsTracks && !p.isRouted(ch, to: .stream)) { return 0 }
+        return Float(Self.meterGain[min(20, Self.hw(c.level * mix.level / 100))]) / 32768
     }
 
     func setDualMix(_ on: Bool) {

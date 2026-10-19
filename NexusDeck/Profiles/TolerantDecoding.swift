@@ -110,7 +110,9 @@ extension MixerProfile {
         chatMicMuted = c.v("chatMicMuted", false)
         micMuteMode = c.v("micMuteMode", .all)
         channelNames = c.v("channelNames", [:])
+        channelIcons = c.v("channelIcons", [:])
         ducking = c.v("ducking", Ducking())
+        obsTracks = c.v("obsTracks", false)
     }
 }
 

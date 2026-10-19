@@ -133,11 +133,14 @@ private struct GeneralPage: View {
             info("Applicazione:", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
             info("Firmware:", firmware)
             HStack {
-                info("Driver audio:", bridge.isPlugInInstalled ? "NexusDeck Audio 1.0" : "non installato")
+                info("Driver audio:", !bridge.isPlugInInstalled ? "non installato" : bridge.isPlugInOutdated ? "da aggiornare" : "aggiornato")
                 Spacer()
-                FlatButton(title: bridge.isPlugInInstalled ? "Reinstalla driver" : "Installa driver", width: 140) { _ = bridge.installPlugIn() }
+                FlatButton(title: !bridge.isPlugInInstalled ? "Installa driver" : bridge.isPlugInOutdated ? "Aggiorna driver" : "Reinstalla driver", width: 140) { _ = bridge.installPlugIn() }
             }
             Text("© 2026 NexusDeck. Non affiliato ad AVerMedia.").font(.system(size: 11)).foregroundStyle(Theme.textMid)
+        }
+        SectionCard(title: "Aggiornamenti") {
+            UpdateRow()
         }
         SectionCard(title: "Lingua") {
             HStack {
@@ -182,6 +185,36 @@ private struct GeneralPage: View {
         HStack(spacing: 20) {
             Text(k).font(.system(size: 13)).foregroundStyle(Theme.textMid).frame(width: 110, alignment: .leading)
             Text(v).font(.system(size: 13))
+        }
+    }
+}
+
+private struct UpdateRow: View {
+    @ObservedObject var updater = Updater.shared
+
+    var body: some View {
+        HStack(spacing: 12) {
+            switch updater.state {
+            case .idle: Text("Controlla se è disponibile una nuova versione su GitHub.").foregroundStyle(Theme.textMid)
+            case .checking: ProgressView().controlSize(.small); Text("Controllo in corso…").foregroundStyle(Theme.textMid)
+            case .upToDate: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green); Text("NexusDeck è aggiornato.").foregroundStyle(Theme.textMid)
+            case .available(let v): Image(systemName: "arrow.down.circle.fill").foregroundStyle(Theme.accent); Text("Disponibile la versione \(v)").bold()
+            case .downloading: ProgressView().controlSize(.small); Text("Download in corso…").foregroundStyle(Theme.textMid)
+            case .installing: ProgressView().controlSize(.small); Text("Installazione… NexusDeck si riavvierà.").foregroundStyle(Theme.textMid)
+            case .failed(let e): Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange); Text(e).foregroundStyle(Theme.textMid).lineLimit(2)
+            }
+            Spacer()
+            if case .available = updater.state {
+                FlatButton(title: "Aggiorna ora", width: 130) { Task { await updater.install() } }
+            } else {
+                FlatButton(title: "Controlla", width: 130) { Task { await updater.check() } }
+                    .disabled(updater.state == .checking || updater.state == .downloading || updater.state == .installing)
+            }
+        }
+        .font(.system(size: 13))
+        if case .available = updater.state, !updater.notes.isEmpty {
+            ScrollView { Text(updater.notes).font(.system(size: 12)).foregroundStyle(Theme.textMid).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }
+                .frame(maxHeight: 110)
         }
     }
 }

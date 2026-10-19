@@ -14,6 +14,7 @@
 #include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #pragma mark - Configuration
 
@@ -54,9 +55,20 @@ static const DeviceDef kDevices[] = {
     { "Chat Bridge",         "NexusDeck.Bridge.Chat",        true,  true, 5 },
     { "Line In Bridge",      "NexusDeck.Bridge.LineIn",      true,  true, 6 },
     { "Console Bridge",      "NexusDeck.Bridge.Console",     true,  true, 7 },
+    // Capture inputs for OBS: a copy of each channel (filled by NexusDeck through the hidden bridges below)
+    { "System",   "NexusDeck.Capture.System",  true,  false, 8 },
+    { "Game",     "NexusDeck.Capture.Game",    true,  false, 9 },
+    { "Chat",     "NexusDeck.Capture.Chat",    true,  false, 10 },
+    { "Line In",  "NexusDeck.Capture.LineIn",  true,  false, 11 },
+    { "Console",  "NexusDeck.Capture.Console", true,  false, 12 },
+    { "System Capture Bridge",  "NexusDeck.Bridge.Cap.System",  false, true, 8 },
+    { "Game Capture Bridge",    "NexusDeck.Bridge.Cap.Game",    false, true, 9 },
+    { "Chat Capture Bridge",    "NexusDeck.Bridge.Cap.Chat",    false, true, 10 },
+    { "Line In Capture Bridge", "NexusDeck.Bridge.Cap.LineIn",  false, true, 11 },
+    { "Console Capture Bridge", "NexusDeck.Bridge.Cap.Console", false, true, 12 },
 };
 #define kDeviceCount ((UInt32)(sizeof(kDevices) / sizeof(kDevices[0])))
-#define kPairCount 8
+#define kPairCount 13
 
 // Object IDs: device i -> 2 + 2i, its stream -> 3 + 2i
 static inline AudioObjectID DeviceID(UInt32 i) { return 2 + 2 * i; }
@@ -86,6 +98,16 @@ static float* gSide[kPairCount];
 #pragma mark - Per-app routing
 
 #define kRouteSelector   'ndrt'
+/// Visible devices currently published (bit = device index). Hidden bridges are always published.
+#define kVisibleSelector 'ndvm'
+static _Atomic UInt32 gVisibleMask = 0xFFFFFFFFu;
+static inline bool IsPublished(UInt32 i) { return kDevices[i].hidden || ((atomic_load(&gVisibleMask) >> i) & 1u); }
+/// Custom device names set by NexusDeck ('ndnm': "index=name\n..."); empty = default name.
+#define kNamesSelector 'ndnm'
+static char gNames[64][128];
+static CFStringRef gNamesString = NULL;
+
+static UInt32 PublishedCount(void) { UInt32 n = 0; for (UInt32 i = 0; i < kDeviceCount; i++) if (IsPublished(i)) n++; return n; }
 #define kMaxClients      256
 #define kMaxRoutes       64
 
@@ -120,7 +142,7 @@ static void ApplyRoutes(CFStringRef str) {
             if (!eq) continue;
             *eq = 0;
             int pair = atoi(eq + 1);
-            if (pair < 3 || pair >= kPairCount || strlen(line) >= 256) continue;
+            if (pair < 3 || pair > 7 || strlen(line) >= 256) continue;
             strcpy(gRoutes[gRouteCount].bundle, line);
             gRoutes[gRouteCount].pair = pair;
             gRouteCount++;
@@ -301,7 +323,7 @@ static Boolean HasProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID ob
 
 static OSStatus IsPropertySettable(AudioServerPlugInDriverRef inDriver, AudioObjectID obj, pid_t pid, const AudioObjectPropertyAddress* addr, Boolean* outSettable) {
     if (!HasProperty(inDriver, obj, pid, addr)) return kAudioHardwareUnknownPropertyError;
-    *outSettable = (obj == kPlugInID && addr->mSelector == kRouteSelector)
+    *outSettable = (obj == kPlugInID && (addr->mSelector == kRouteSelector || addr->mSelector == kVisibleSelector || addr->mSelector == kNamesSelector))
                 || (DeviceIndex(obj) >= 0 && addr->mSelector == kAudioDevicePropertyNominalSampleRate)
                 || (StreamIndex(obj) >= 0 && (addr->mSelector == kAudioStreamPropertyVirtualFormat || addr->mSelector == kAudioStreamPropertyPhysicalFormat));
     return 0;
@@ -312,11 +334,13 @@ static OSStatus PlugInSize(const AudioObjectPropertyAddress* a, UInt32* s) {
         case kAudioObjectPropertyBaseClass: case kAudioObjectPropertyClass: *s = sizeof(AudioClassID); return 0;
         case kAudioObjectPropertyOwner: *s = sizeof(AudioObjectID); return 0;
         case kAudioObjectPropertyManufacturer: case kAudioPlugInPropertyResourceBundle: *s = sizeof(CFStringRef); return 0;
-        case kAudioObjectPropertyOwnedObjects: case kAudioPlugInPropertyDeviceList: *s = kDeviceCount * sizeof(AudioObjectID); return 0;
+        case kAudioObjectPropertyOwnedObjects: case kAudioPlugInPropertyDeviceList: *s = PublishedCount() * sizeof(AudioObjectID); return 0;
         case kAudioPlugInPropertyTranslateUIDToDevice: *s = sizeof(AudioObjectID); return 0;
         case kAudioPlugInPropertyBoxList: *s = 0; return 0;
-        case kAudioObjectPropertyCustomPropertyInfoList: *s = sizeof(AudioServerPlugInCustomPropertyInfo); return 0;
+        case kAudioObjectPropertyCustomPropertyInfoList: *s = 3 * sizeof(AudioServerPlugInCustomPropertyInfo); return 0;
         case kRouteSelector: *s = sizeof(CFStringRef); return 0;
+        case kVisibleSelector: *s = sizeof(CFNumberRef); return 0;
+        case kNamesSelector: *s = sizeof(CFStringRef); return 0;
     }
     return kAudioHardwareUnknownPropertyError;
 }
@@ -380,9 +404,8 @@ static OSStatus GetPropertyData(AudioServerPlugInDriverRef inDriver, AudioObject
             case kAudioPlugInPropertyResourceBundle: WRITE(CFStringRef, CFStr("")); return 0;
             case kAudioObjectPropertyOwnedObjects:
             case kAudioPlugInPropertyDeviceList: {
-                UInt32 n = inDataSize / sizeof(AudioObjectID);
-                if (n > kDeviceCount) n = kDeviceCount;
-                for (UInt32 i = 0; i < n; i++) ((AudioObjectID*)outData)[i] = DeviceID(i);
+                UInt32 max = inDataSize / sizeof(AudioObjectID), n = 0;
+                for (UInt32 i = 0; i < kDeviceCount && n < max; i++) if (IsPublished(i)) ((AudioObjectID*)outData)[n++] = DeviceID(i);
                 *outDataSize = n * sizeof(AudioObjectID);
                 return 0;
             }
@@ -392,7 +415,7 @@ static OSStatus GetPropertyData(AudioServerPlugInDriverRef inDriver, AudioObject
                 AudioObjectID found = kAudioObjectUnknown;
                 for (UInt32 i = 0; i < kDeviceCount; i++) {
                     CFStringRef s = CFStr(kDevices[i].uid);
-                    if (CFStringCompare(uid, s, 0) == kCFCompareEqualTo) found = DeviceID(i);
+                    if (IsPublished(i) && CFStringCompare(uid, s, 0) == kCFCompareEqualTo) found = DeviceID(i);
                     CFRelease(s);
                 }
                 WRITE(AudioObjectID, found);
@@ -400,8 +423,26 @@ static OSStatus GetPropertyData(AudioServerPlugInDriverRef inDriver, AudioObject
             }
             case kAudioPlugInPropertyBoxList: *outDataSize = 0; return 0;
             case kAudioObjectPropertyCustomPropertyInfoList: {
-                AudioServerPlugInCustomPropertyInfo info = { kRouteSelector, kAudioServerPlugInCustomPropertyDataTypeCFString, kAudioServerPlugInCustomPropertyDataTypeNone };
-                WRITE(AudioServerPlugInCustomPropertyInfo, info);
+                if (inDataSize < 3 * sizeof(AudioServerPlugInCustomPropertyInfo)) return kAudioHardwareBadPropertySizeError;
+                AudioServerPlugInCustomPropertyInfo* info = outData;
+                info[0] = (AudioServerPlugInCustomPropertyInfo){ kRouteSelector, kAudioServerPlugInCustomPropertyDataTypeCFString, kAudioServerPlugInCustomPropertyDataTypeNone };
+                info[1] = (AudioServerPlugInCustomPropertyInfo){ kVisibleSelector, kAudioServerPlugInCustomPropertyDataTypeCFPropertyList, kAudioServerPlugInCustomPropertyDataTypeNone };
+                info[2] = (AudioServerPlugInCustomPropertyInfo){ kNamesSelector, kAudioServerPlugInCustomPropertyDataTypeCFString, kAudioServerPlugInCustomPropertyDataTypeNone };
+                *outDataSize = 3 * sizeof(AudioServerPlugInCustomPropertyInfo);
+                return 0;
+            }
+            case kNamesSelector: {
+                if (inDataSize < sizeof(CFStringRef)) return kAudioHardwareBadPropertySizeError;
+                pthread_mutex_lock(&gMutex);
+                *(CFStringRef*)outData = gNamesString ? CFStringCreateCopy(NULL, gNamesString) : CFStr("");
+                pthread_mutex_unlock(&gMutex);
+                *outDataSize = sizeof(CFStringRef);
+                return 0;
+            }
+            case kVisibleSelector: {
+                if (inDataSize < sizeof(CFNumberRef)) return kAudioHardwareBadPropertySizeError;
+                SInt64 v = atomic_load(&gVisibleMask);
+                *(CFNumberRef*)outData = CFNumberCreate(NULL, kCFNumberSInt64Type, &v); *outDataSize = sizeof(CFNumberRef);
                 return 0;
             }
             case kRouteSelector: {
@@ -423,7 +464,17 @@ static OSStatus GetPropertyData(AudioServerPlugInDriverRef inDriver, AudioObject
             case kAudioObjectPropertyBaseClass: WRITE(AudioClassID, kAudioObjectClassID); return 0;
             case kAudioObjectPropertyClass: WRITE(AudioClassID, kAudioDeviceClassID); return 0;
             case kAudioObjectPropertyOwner: WRITE(AudioObjectID, kPlugInID); return 0;
-            case kAudioObjectPropertyName: WRITE(CFStringRef, CFStr(dev->name)); return 0;
+            case kAudioObjectPropertyName: {
+                pthread_mutex_lock(&gMutex);
+                // Visible devices are prefixed with their direction: "[AM-IN] Chat Mic", "[AM-OUT] System".
+                char full[160];
+                snprintf(full, sizeof(full), "%s%s", dev->hidden ? "" : (dev->input ? "[AM-IN] " : "[AM-OUT] "), gNames[d][0] ? gNames[d] : dev->name);
+                CFStringRef n = CFStr(full);
+                pthread_mutex_unlock(&gMutex);
+                if (inDataSize < sizeof(CFStringRef)) { CFRelease(n); return kAudioHardwareBadPropertySizeError; }
+                *(CFStringRef*)outData = n; *outDataSize = sizeof(CFStringRef);
+                return 0;
+            }
             case kAudioObjectPropertyManufacturer: WRITE(CFStringRef, CFStr("NexusDeck")); return 0;
             case kAudioDevicePropertyDeviceUID: WRITE(CFStringRef, CFStr(dev->uid)); return 0;
             case kAudioDevicePropertyModelUID: WRITE(CFStringRef, CFStr("NexusDeck.Model")); return 0;
@@ -518,6 +569,50 @@ static OSStatus GetPropertyData(AudioServerPlugInDriverRef inDriver, AudioObject
 static OSStatus SetPropertyData(AudioServerPlugInDriverRef inDriver, AudioObjectID obj, pid_t pid, const AudioObjectPropertyAddress* a,
                                 UInt32 qs, const void* q, UInt32 size, const void* data) {
     (void)inDriver; (void)pid; (void)qs; (void)q; (void)size;
+    if (obj == kPlugInID && a->mSelector == kNamesSelector) {
+        if (size < sizeof(CFStringRef)) return kAudioHardwareBadPropertySizeError;
+        CFStringRef str = *(const CFStringRef*)data;
+        if (!str || CFGetTypeID(str) != CFStringGetTypeID()) return kAudioHardwareIllegalOperationError;
+        char old[64][128], buf[8192];
+        pthread_mutex_lock(&gMutex);
+        memcpy(old, gNames, sizeof(old));
+        memset(gNames, 0, sizeof(gNames));
+        if (gNamesString) CFRelease(gNamesString);
+        gNamesString = CFStringCreateCopy(NULL, str);
+        if (CFStringGetCString(str, buf, sizeof(buf), kCFStringEncodingUTF8)) {
+            char* save = NULL;
+            for (char* line = strtok_r(buf, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+                char* eq = strchr(line, '=');
+                if (!eq) continue;
+                *eq = 0;
+                int i = atoi(line);
+                if (i < 0 || i >= (int)kDeviceCount || kDevices[i].hidden) continue;
+                strncpy(gNames[i], eq + 1, sizeof(gNames[i]) - 1);
+            }
+        }
+        pthread_mutex_unlock(&gMutex);
+        if (gHost) {
+            AudioObjectPropertyAddress name = { kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
+            for (UInt32 i = 0; i < kDeviceCount; i++)
+                if (strcmp(old[i], gNames[i]) != 0) gHost->PropertiesChanged(gHost, DeviceID(i), 1, &name);
+        }
+        return 0;
+    }
+    if (obj == kPlugInID && a->mSelector == kVisibleSelector) {
+        if (size < sizeof(CFNumberRef)) return kAudioHardwareBadPropertySizeError;
+        CFNumberRef num = *(const CFNumberRef*)data;
+        SInt64 v = 0;
+        if (!num || CFGetTypeID(num) != CFNumberGetTypeID() || !CFNumberGetValue(num, kCFNumberSInt64Type, &v)) return kAudioHardwareIllegalOperationError;
+        UInt32 old = atomic_exchange(&gVisibleMask, (UInt32)v);
+        if (old != (UInt32)v && gHost) {
+            AudioObjectPropertyAddress changed[2] = {
+                { kAudioPlugInPropertyDeviceList, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain },
+                { kAudioObjectPropertyOwnedObjects, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain },
+            };
+            gHost->PropertiesChanged(gHost, kPlugInID, 2, changed);
+        }
+        return 0;
+    }
     if (obj == kPlugInID && a->mSelector == kRouteSelector) {
         if (size < sizeof(CFStringRef)) return kAudioHardwareBadPropertySizeError;
         CFStringRef str = *(const CFStringRef*)data;

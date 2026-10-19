@@ -61,7 +61,11 @@ final class DeviceSession {
         c.events.receive(on: RunLoop.main).sink { [weak self] in self?.handle($0) }.store(in: &deviceBag)
 
         Task {
-            if let fw = await c.firmwareVersion() { devices.updateFirmwareVersion(fw) }
+            // The first reply can be lost while the device is still starting up (or busy): try a few times.
+            for attempt in 0..<5 {
+                if let fw = await c.firmwareVersion() { devices.updateFirmwareVersion(fw); break }
+                if attempt < 4 { try? await Task.sleep(for: .milliseconds(600)) }
+            }
             c.send(AXProtocol.panelOn())
             c.send(AXProtocol.levelMeters(true))
             audio.applyAll()

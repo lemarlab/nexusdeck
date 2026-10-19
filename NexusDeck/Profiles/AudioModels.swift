@@ -78,12 +78,22 @@ struct MixerProfile: Codable, Identifiable, Hashable {
     var micMuteMode: MicMuteMode = .all
     /// Custom channel names shown in the app and on the panel.
     var channelNames: [String: String] = [:]
+    /// Custom channel icons (SF Symbol names).
+    var channelIcons: [String: String] = [:]
     var ducking = Ducking()
+    /// OBS tracks mode: the Audience mix carries the physical Line In only (it becomes "Line In (OBS)"),
+    /// every source reaches OBS on its own capture input.
+    var obsTracks = false
 
     func isRouted(_ ch: MixerChannel, to out: RouteOutput) -> Bool { routes["\(out.rawValue).\(ch.rawValue)"] ?? true }
     func name(_ ch: MixerChannel) -> String {
         let n = channelNames[ch.rawValue]?.trimmingCharacters(in: .whitespaces) ?? ""
-        return n.isEmpty ? ch.title : n
+        return n.isEmpty ? ch.title : n.uppercased()
+    }
+    /// Icon of a channel in the app (custom SF Symbol or the default one).
+    func symbol(_ ch: MixerChannel) -> String {
+        let s = channelIcons[ch.rawValue] ?? ""
+        return s.isEmpty ? ch.columnSymbol : s
     }
 }
 
