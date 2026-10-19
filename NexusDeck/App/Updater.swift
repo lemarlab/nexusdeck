@@ -19,16 +19,54 @@ final class Updater: ObservableObject {
 
     var latestVersion: String? { if case .available(let v) = state { return v }; return nil }
 
-    /// Checks at most once a day, silently, at launch.
-    func checkAtLaunch() {
-        let key = "updater.lastCheck"
-        let last = UserDefaults.standard.double(forKey: key)
-        guard Date().timeIntervalSince1970 - last > 86_400 else { return }
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: key)
+    /// How often NexusDeck looks for updates on its own.
+    enum Frequency: Int, CaseIterable, Identifiable {
+        case launch = 0, daily, weekly, monthly, never
+        var id: Int { rawValue }
+        var title: String {
+            switch self {
+            case .launch: "A ogni avvio"
+            case .daily: "Ogni giorno"
+            case .weekly: "Ogni settimana"
+            case .monthly: "Ogni mese"
+            case .never: "Mai"
+            }
+        }
+        var interval: TimeInterval? {
+            switch self {
+            case .launch: nil
+            case .daily: 86_400
+            case .weekly: 7 * 86_400
+            case .monthly: 30 * 86_400
+            case .never: nil
+            }
+        }
+    }
+
+    @Published var frequency: Frequency = Frequency(rawValue: UserDefaults.standard.integer(forKey: "updater.frequency")) ?? .launch {
+        didSet { UserDefaults.standard.set(frequency.rawValue, forKey: "updater.frequency") }
+    }
+    private let lastCheckKey = "updater.lastCheck"
+    private var timer: Timer?
+
+    /// Automatic checks: at launch, then (while the app stays open) whenever the chosen interval has passed.
+    func startAutomaticChecks() {
+        if frequency == .launch { Task { await check() } } else { checkIfDue() }
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkIfDue() }
+        }
+    }
+
+    private func checkIfDue() {
+        guard let interval = frequency.interval else { return }
+        let last = UserDefaults.standard.double(forKey: lastCheckKey)
+        guard Date().timeIntervalSince1970 - last >= interval else { return }
         Task { await check() }
     }
 
     func check() async {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastCheckKey)
         state = .checking
         do {
             // All releases (pre-releases included): the newest version that has a DMG.

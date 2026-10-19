@@ -79,7 +79,7 @@ final class AppState: ObservableObject {
         bridge.setSingleMix(!store.mixer.dualMix && !store.mixer.obsTracks)
         bridge.start(sampleRate: Double(store.library.device.sampleRate))
         appRouter.start()
-        Updater.shared.checkAtLaunch()
+        Updater.shared.startAutomaticChecks()
         appRouter.setVisibility(dualMix: store.mixer.dualMix, obsTracks: store.mixer.obsTracks)
         appRouter.setNames(store.mixer)
         mixSync = store.objectWillChange.debounce(for: .milliseconds(200), scheduler: RunLoop.main).sink { [self] _ in

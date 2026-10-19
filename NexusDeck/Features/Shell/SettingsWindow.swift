@@ -207,11 +207,16 @@ private struct UpdateRow: View {
             if case .available = updater.state {
                 FlatButton(title: "Aggiorna ora", width: 130) { Task { await updater.install() } }
             } else {
-                FlatButton(title: "Controlla", width: 130) { Task { await updater.check() } }
+                FlatButton(title: "Controlla aggiornamenti", width: 190) { Task { await updater.check() } }
                     .disabled(updater.state == .checking || updater.state == .downloading || updater.state == .installing)
             }
         }
         .font(.system(size: 13))
+        HStack(spacing: 12) {
+            Text("Controllo automatico:").font(.system(size: 13)).foregroundStyle(Theme.textMid)
+            DarkPicker(selection: $updater.frequency, options: Updater.Frequency.allCases.map { ($0, $0.title) }, height: 26).frame(width: 200)
+            Spacer()
+        }
         if case .available = updater.state, !updater.notes.isEmpty {
             ScrollView { Text(updater.notes).font(.system(size: 12)).foregroundStyle(Theme.textMid).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }
                 .frame(maxHeight: 110)
