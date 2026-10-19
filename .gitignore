@@ -1,0 +1,7 @@
+build/
+dist/
+DerivedData/
+AudioPlugin/build/
+*.xcuserstate
+xcuserdata/
+.DS_Store
