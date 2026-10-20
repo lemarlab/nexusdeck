@@ -363,47 +363,4 @@ struct InspectorRow<Trailing: View>: View {
     }
 }
 
-// MARK: - OBS tracks page
-
-struct OBSTracksPage: View {
-    @EnvironmentObject var store: ProfileStore
-    @EnvironmentObject var audio: AudioService
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 12) {
-                PillToggle(isOn: Binding(get: { store.mixer.obsTracks }, set: { audio.setOBSTracks($0) }))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Tracce separate per OBS").font(.system(size: 14, weight: .semibold))
-                    Text("Ogni canale diventa anche un ingresso [AM-IN]: in OBS ogni sorgente può andare sulla sua traccia (es. musica in diretta ma non nel VOD).")
-                        .font(.system(size: 12)).foregroundStyle(Theme.textDim).fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .cardStyle()
-            InspectorSection("In OBS aggiungi «Acquisizione ingresso audio»") {
-                deviceRow(.mic, "[AM-IN] Chat Mic", "Solo la voce")
-                deviceRow(.lineIn, "[AM-IN] \(store.mixer.name(.lineIn).capitalized)", store.mixer.obsTracks ? "Line In fisico (via Audience Mix) + dispositivo Line In" : "Dispositivo Line In del Mac")
-                deviceRow(.console, "[AM-IN] \(store.mixer.name(.console).capitalized)", "Dispositivo Console del Mac")
-                deviceRow(.system, "[AM-IN] \(store.mixer.name(.system).capitalized)", "System e app instradate")
-                deviceRow(.game, "[AM-IN] \(store.mixer.name(.game).capitalized)", "Game e app instradate")
-                deviceRow(.chat, "[AM-IN] \(store.mixer.name(.chat).capitalized)", "Chat e app instradate")
-            }
-            .opacity(store.mixer.obsTracks ? 1 : 0.5)
-            Text("Ogni ingresso segue la manopola, il muto e il ducking del suo canale. Per togliere la musica dal VOD di Twitch: in OBS → Proprietà audio avanzate, togli la musica dalla traccia del VOD.")
-                .font(.system(size: 11.5)).foregroundStyle(Theme.textFaint).fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func deviceRow(_ ch: MixerChannel, _ name: String, _ detail: String) -> some View {
-        HStack(spacing: 10) {
-            ChannelTile(channel: ch, size: 26)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(name).font(.system(size: 12.5, weight: .medium))
-                Text(detail).font(.system(size: 11)).foregroundStyle(Theme.textDim)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 12).frame(minHeight: 46)
-    }
-}
 
