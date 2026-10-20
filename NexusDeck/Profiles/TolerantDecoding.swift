@@ -153,6 +153,8 @@ extension DSPProfile {
         noiseGateEnabled = c.v("noiseGateEnabled", def.noiseGateEnabled)
         noiseGate = c.v("noiseGate", def.noiseGate)
         voiceChanger = c.v("voiceChanger", def.voiceChanger)
+        appVoice = c.v("appVoice", 1)
+        appVoiceOn = c.v("appVoiceOn", false)
     }
 }
 
@@ -233,5 +235,20 @@ extension NoiseGate {
         hold = c.v("hold", 10)
         release = c.v("release", 700)
         wetRatio = c.v("wetRatio", 1)
+    }
+}
+
+extension Reverb {
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: AnyKey.self)
+        self.init()
+        roomSize = c.v("roomSize", roomSize)
+        damp = c.v("damp", damp)
+        density = c.v("density", density)
+        diffusion = c.v("diffusion", diffusion)
+        gain = c.v("gain", gain)
+        wetGain = c.v("wetGain", wetGain)
+        time = c.v("time", time)
+        mode = c.v("mode", 0)
     }
 }

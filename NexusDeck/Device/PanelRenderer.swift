@@ -50,7 +50,7 @@ struct PanelCanvas: View {
 
     @ViewBuilder private var background: some View {
         let bg = store.library.device.background
-        if bg.mode == .image, let img = NSImage(contentsOfFile: bg.imagePath) {
+        if bg.mode == .image, let img = ImageCache.image(atPath: bg.imagePath) {
             ZStack {
                 Color(hex: bg.colorHex)
                 switch bg.displayMode {
@@ -89,47 +89,54 @@ struct PanelCanvas: View {
     }
 }
 
-/// Panel image in the middle of a page change: the old page slides out while the new one slides in.
-struct PanelTransitionCanvas: View {
-    @ObservedObject var deck: DeckController
-    @ObservedObject var store: ProfileStore
-    var images: [UUID: NSImage]
-    let from: Int, to: Int, forward: Bool
-    /// 0 … 1
-    let progress: CGFloat
-
-    var body: some View {
-        let w = PanelCanvas.size.width, d: CGFloat = forward ? 1 : -1
-        ZStack(alignment: .topLeading) {
-            PanelCanvas(deck: deck, store: store, images: images, page: -1)
-            PanelCanvas(deck: deck, store: store, images: images, page: from, drawsBackground: false).offset(x: -d * progress * w)
-            PanelCanvas(deck: deck, store: store, images: images, page: to, drawsBackground: false).offset(x: d * (1 - progress) * w)
-        }
-        .frame(width: PanelCanvas.size.width, height: PanelCanvas.size.height)
-        .clipped()
-    }
-}
-
 @MainActor
 enum PanelRenderer {
-    static func transitionJPEG(deck: DeckController, store: ProfileStore, images: [UUID: NSImage], from: Int, to: Int,
-                               forward: Bool, progress: CGFloat, quality: CGFloat) -> Data? {
-        let r = ImageRenderer(content: PanelTransitionCanvas(deck: deck, store: store, images: images, from: from, to: to, forward: forward, progress: progress))
-        r.scale = 1
-        guard let cg = r.cgImage else { return nil }
-        return NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: quality])
+    static func jpeg(deck: DeckController, store: ProfileStore, images: [UUID: NSImage], touched: UUID?, quality: CGFloat = 0.8) -> Data? {
+        guard let cg = image(deck: deck, store: store, images: images, touched: touched) else { return nil }
+        return encode(cg, quality: quality)
     }
 
-    static func jpeg(deck: DeckController, store: ProfileStore, images: [UUID: NSImage], touched: UUID?, quality: CGFloat = 0.8) -> Data? {
-        let r = ImageRenderer(content: PanelCanvas(deck: deck, store: store, images: images, touchedKey: touched))
-        r.scale = 1
-        guard let cg = r.cgImage else { return nil }
-        let rep = NSBitmapImageRep(cgImage: cg)
-        var q = quality
-        while q > 0.2 {
-            if let d = rep.representation(using: .jpeg, properties: [.compressionFactor: q]), d.count <= AXProtocol.maxFrameBytes { return d }
-            q -= 0.15
+    /// One layer of a page slide: the background only, or the keys of a page on a transparent background.
+    static func layer(deck: DeckController, store: ProfileStore, images: [UUID: NSImage], page: Int, background: Bool) -> CGImage? {
+        autoreleasepool {
+            let r = ImageRenderer(content: PanelCanvas(deck: deck, store: store, images: images, page: page, drawsBackground: background))
+            r.scale = 1
+            r.isOpaque = background
+            return r.cgImage
         }
-        return nil
+    }
+
+    /// A frame of the page slide composed from the three layers (any thread).
+    nonisolated static func slide(bg: CGImage, old: CGImage, new: CGImage, forward: Bool, progress: CGFloat) -> CGImage? {
+        let w = bg.width, h = bg.height
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        let d: CGFloat = forward ? 1 : -1, W = CGFloat(w)
+        ctx.draw(bg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.draw(old, in: CGRect(x: -d * progress * W, y: 0, width: W, height: CGFloat(h)))
+        ctx.draw(new, in: CGRect(x: d * (1 - progress) * W, y: 0, width: W, height: CGFloat(h)))
+        return ctx.makeImage()
+    }
+
+    /// Draws the panel (SwiftUI, main thread).
+    static func image(deck: DeckController, store: ProfileStore, images: [UUID: NSImage], touched: UUID?) -> CGImage? {
+        autoreleasepool {
+            let r = ImageRenderer(content: PanelCanvas(deck: deck, store: store, images: images, touchedKey: touched))
+            r.scale = 1
+            return r.cgImage
+        }
+    }
+
+    /// JPEG for the device (any thread), lowering the quality if the frame is too big.
+    nonisolated static func encode(_ cg: CGImage, quality: CGFloat) -> Data? {
+        autoreleasepool {
+            let rep = NSBitmapImageRep(cgImage: cg)
+            var q = quality
+            while q > 0.2 {
+                if let d = rep.representation(using: .jpeg, properties: [.compressionFactor: q]), d.count <= AXProtocol.maxFrameBytes { return d }
+                q -= 0.15
+            }
+            return nil
+        }
     }
 }

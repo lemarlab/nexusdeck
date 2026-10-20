@@ -116,7 +116,8 @@ final class AXController {
     /// Adds a frame after the ones already waiting (animation frames).
     func append(jpeg: Data) {
         guard jpeg.count <= AXProtocol.maxFrameBytes else { return }
-        enqueue { $0.append(jpeg) }
+        // Fast page changes: older animation frames are dropped (at most one animation waits).
+        enqueue { q in q.append(jpeg); if q.count > 6 { q.removeFirst(q.count - 6) } }
     }
 
     private func enqueue(_ change: (inout [Data]) -> Void) {

@@ -42,32 +42,50 @@ struct DeckStage: View {
 private struct ProgressiveFog: ViewModifier {
     enum Mode: Equatable { case knobs, top }
     let mode: Mode
+    /// The blur of the other page stays only during the switch (each copy re-renders the whole drawing).
+    @State private var shown: Set<Mode> = []
 
     func body(content: Content) -> some View {
-        // Blurred copies of the drawing, each visible over its band (the material overlay alone does not
-        // blur the drawing below it).
-        // Both blurs are always there and cross-fade with the same spring that moves the device, so they
-        // follow it instead of popping in or lingering.
         let keys = mode == .knobs
-        ZStack {
-            content
-            blurred(content, 2.5, [(0.0, 0), (470, 0), (505, 1), (1, 1)]).opacity(keys ? 1 : 0)
-            blurred(content, 6, [(0.0, 0), (500, 0), (545, 1), (1, 1)]).opacity(keys ? 1 : 0)
-            blurred(content, 8, [(0.0, 1), (250, 1), (350, 0), (1, 0)]).opacity(keys ? 0 : 1)
-            blurred(content, 3, [(0.0, 1), (330, 1), (385, 0), (1, 0)]).opacity(keys ? 0 : 1)
-        }
-        .animation(.spring(response: 0.6, dampingFraction: 0.88), value: keys)
+        content
+            .overlay {
+                GeometryReader { g in
+                    let k = g.size.height / 599
+                    ZStack(alignment: .top) {
+                        if shown.contains(.knobs) {
+                            band(content, radius: 4, from: 440, to: 599, k: k, size: g.size,
+                                 stops: [(0, 0), (472, 0), (540, 1), (599, 1)]).opacity(keys ? 1 : 0)
+                        }
+                        if shown.contains(.top) {
+                            band(content, radius: 7, from: 0, to: 400, k: k, size: g.size,
+                                 stops: [(0, 1), (290, 1), (385, 0), (400, 0)]).opacity(keys ? 0 : 1)
+                        }
+                    }
+                }
+                .allowsHitTesting(false)
+            }
+            .animation(.spring(response: 0.6, dampingFraction: 0.88), value: keys)
+            .onAppear { shown = [mode] }
+            .onChange(of: mode) { _, m in
+                shown.insert(m)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { if mode == m { shown = [m] } }
+            }
     }
 
-    /// Stops in drawing units (y of the 599-high design; 0 and 1 = edges) with the copy's opacity.
-    private func blurred(_ content: Content, _ radius: CGFloat, _ stops: [(CGFloat, Double)]) -> some View {
-        let gs = stops.map { y, o -> Gradient.Stop in
-            Gradient.Stop(color: .black.opacity(o), location: y <= 1 ? y : y / 599)
-        }
+    /// Blurred copy of only the band `from…to` (design units): blurring the small band is much cheaper than
+    /// the whole drawing. `stops` give the visibility along the band.
+    private func band(_ content: Content, radius: CGFloat, from: CGFloat, to: CGFloat, k: CGFloat, size: CGSize,
+                      stops: [(CGFloat, Double)]) -> some View {
+        let h = (to - from) * k
+        let gs = stops.map { Gradient.Stop(color: .black.opacity($0.1), location: ($0.0 - from) / (to - from)) }
         return content
+            .frame(width: size.width, height: size.height)
+            .offset(y: -from * k)
+            .frame(width: size.width, height: h, alignment: .top)
+            .clipped()
             .blur(radius: radius)
             .mask(LinearGradient(stops: gs, startPoint: .top, endPoint: .bottom))
-            .allowsHitTesting(false)
+            .offset(y: from * k)
     }
 }
 

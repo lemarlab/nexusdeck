@@ -181,16 +181,35 @@ enum AXProtocol {
         return dsp(0x9F, stage(a) + stage(b) + [UInt8(max(0, min(255, dbToLinear(makeup) * 16)))])
     }
 
-    static func reverb(_ r: Reverb, echo: Echo) -> Command {
-        func lin(_ v: Double) -> UInt8 { UInt8(max(0, min(255, v * 255))) }
-        func db(_ v: Double) -> UInt8 { UInt8(max(0, min(255, dbToLinear(v) * 255))) }
+    /// Reverb + echo block, byte for byte as AxCorePrivate::setReverb (AxEffect::Echo / Reverb, verified layout).
+    /// `enabled` = bit0 reverb, bit1 echo (the DSP mixes in only the enabled effects).
+    static func reverb(_ r: Reverb, echo: Echo, enabled: UInt8) -> Command {
+        func g(_ db: Double) -> UInt8 { UInt8(truncatingIfNeeded: Int(pow(10, db.rounded() / 20) * 255)) }
+        func u(_ v: Double) -> UInt8 { UInt8(truncatingIfNeeded: Int(v * 255)) }
+        func decay(_ a: Double, _ t: Double) -> UInt8 {
+            let v = Int((pow(10, -3 * a / (1000 * max(t, 0.001))) - 0.7) / 0.28 * 255)
+            return UInt8(max(0, min(255, v)))
+        }
+        let delay = Int(echo.delay.rounded())
         var p: [UInt8] = []
-        p += [db(echo.gain), db(echo.dryGain), lin(echo.time / 10)]
-        p += le16(3000 - Int(echo.delay * 11025 / 1000))
-        p += [lin(r.damp), lin(r.density), lin(r.diffusion), db(r.gain), db(r.wetGain)]
-        p += le16(Int(r.roomSize * -22050 / 340) + 1500)
-        p += [lin(r.time / 10), 0x40, 0x00, 0x00, 0x4E, 0x04, 0x40]
-        return dsp(0x94, Array(p.prefix(21)) + [UInt8](repeating: 0, count: max(0, 21 - p.count)))
+        p.append(g(echo.gain))                                   // 4
+        p.append(decay(r.roomSize, r.time))                      // 5
+        p.append(u(r.damp))                                      // 6
+        p.append(g(r.gain))                                      // 7
+        p.append(0x40)                                           // 8
+        p.append(g(echo.dryGain))                                // 9
+        p.append(UInt8(truncatingIfNeeded: Int(pow(10, r.wetGain.rounded() / 20) * 128)))  // 10
+        p.append(decay(Double(delay), echo.time))                // 11
+        p.append(u(r.diffusion))                                 // 12
+        p.append(0)                                              // 13
+        p.append(u(r.diffusion * r.mode))                        // 14
+        p += [0x4E, 0x04, 0x40]                                  // 15-17
+        p.append(enabled)                                        // 18
+        p += le16(3000 - delay * 11025 / 1000)                   // 19-20
+        p.append(u(r.density))                                   // 21
+        p += le16(Int(r.roomSize * -22050 / 340 + 1500))         // 22-23
+        p.append(0)                                              // 24
+        return dsp(0x94, p)
     }
 
     // MARK: EQ

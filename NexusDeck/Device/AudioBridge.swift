@@ -1,5 +1,6 @@
 import Foundation
 import CoreAudio
+import Accelerate
 import AppKit
 import Combine
 
@@ -53,6 +54,22 @@ final class AudioBridge: ObservableObject {
         var count: Int32
         var gains: UnsafeMutablePointer<Float>
         var routes: UnsafeMutablePointer<Route>
+        /// Voice changer: Chat Mic input (USB in 5-6), Chat Mic device (bridge), Chat channel to the mixer (USB out 5-6).
+        var fxIn: (Route, Route) = (Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0), Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0))
+        var fxToChatMic: (Route, Route) = (Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0), Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0))
+        var fxToMixer: (Route, Route) = (Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0), Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0))
+        var fx: UnsafeMutablePointer<VoiceFX.State>
+        var scratch: UnsafeMutablePointer<Float>
+    }
+    /// Voice changer (shared with the IO thread).
+    private let voiceState = VoiceFX.makeState()
+    private let voiceScratch = UnsafeMutablePointer<Float>.allocate(capacity: 8192)
+
+    /// Selects the voice (0 = off). The filtered voice replaces the mic on Chat Mic and is sent back to the
+    /// mixer on the Chat channel, so it is heard in the headphones and on stream.
+    func setVoice(_ v: Int, returnGain: Float) {
+        voiceState.pointee.voice = Int32(v)
+        voiceState.pointee.returnGain = returnGain
     }
     private var gainValues: [Float] = [1, 1, 1, 1, 1, 1, 1, 1, 0]
 
@@ -338,6 +355,15 @@ final class AudioBridge: ObservableObject {
             }
             cap(2, 3, .capLineInHW)   // USB input 3-4 = Audience mix
         }
+        // Voice changer endpoints.
+        func r(_ src: (Int32, Int32)?, _ dst: (Int32, Int32)?) -> Route {
+            guard let src, let dst else { return Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0) }
+            return Route(srcBuffer: src.0, srcChannel: src.1, dstBuffer: dst.0, dstChannel: dst.1, gain: 0)
+        }
+        let fxIn = (r(locate(inLayout, 4), locate(inLayout, 4)), r(locate(inLayout, 5), locate(inLayout, 5)))
+        let fxChat = (r(locate(outLayout, usbOut + 4), locate(outLayout, usbOut + 4)), r(locate(outLayout, usbOut + 5), locate(outLayout, usbOut + 5)))
+        let fxMix = (r(locate(outLayout, 4), locate(outLayout, 4)), r(locate(outLayout, 5), locate(outLayout, 5)))
+        voiceState.pointee.sampleRate = Float(sampleRate)
         let p = UnsafeMutablePointer<RoutePlan>.allocate(capacity: 1)
         let rp = UnsafeMutablePointer<Route>.allocate(capacity: Self.maxRoutes)
         let count = min(routes.count, Self.maxRoutes)
@@ -345,7 +371,8 @@ final class AudioBridge: ObservableObject {
         let gp = UnsafeMutablePointer<Float>.allocate(capacity: Self.gainCount)
         for i in 0..<Self.gainCount { (gp + i).initialize(to: gainValues[i]) }
         gp[0] = 1
-        p.initialize(to: RoutePlan(count: Int32(count), gains: gp, routes: rp))
+        p.initialize(to: RoutePlan(count: Int32(count), gains: gp, routes: rp, fxIn: fxIn, fxToChatMic: fxChat, fxToMixer: fxMix,
+                                   fx: voiceState, scratch: voiceScratch))
         return p
     }
 
@@ -367,8 +394,38 @@ final class AudioBridge: ObservableObject {
                 let sc = Int(r.srcChannel), dc = Int(r.dstChannel)
                 let k = g[Int(r.gain)]
                 if k == 0 { continue }
-                for f in 0..<frames { dp[f * dStride + dc] += sp[f * sStride + sc] * k }
+                // dst[f] += src[f] * k on interleaved channels (vectorised).
+                var gain = k
+                vDSP_vsma(sp + sc, vDSP_Stride(sStride), &gain, dp + dc, vDSP_Stride(dStride), dp + dc, vDSP_Stride(dStride), vDSP_Length(frames))
             }
+        }
+        voice(plan, ins, outs)
+    }
+
+    /// Voice changer: mono mic from the Chat Mic input → effects → Chat Mic device (replacing the clean voice)
+    /// and added to the Chat channel going back to the mixer.
+    nonisolated private static func voice(_ plan: UnsafeMutablePointer<RoutePlan>, _ ins: UnsafeMutableAudioBufferListPointer, _ outs: UnsafeMutableAudioBufferListPointer) {
+        let pl = plan.pointee
+        guard pl.fx.pointee.voice > 0, pl.fxIn.0.srcBuffer >= 0, pl.fxIn.1.srcBuffer >= 0 else { return }
+        func ptr(_ l: UnsafeMutableAudioBufferListPointer, _ r: Route) -> (UnsafeMutablePointer<Float>, Int, Int)? {
+            guard r.srcBuffer >= 0, Int(r.srcBuffer) < l.count, let d = l[Int(r.srcBuffer)].mData?.assumingMemoryBound(to: Float.self) else { return nil }
+            let ch = Int(l[Int(r.srcBuffer)].mNumberChannels)
+            return (d + Int(r.srcChannel), max(ch, 1), Int(l[Int(r.srcBuffer)].mDataByteSize) / 4 / max(ch, 1))
+        }
+        guard let l = ptr(ins, pl.fxIn.0), let rr = ptr(ins, pl.fxIn.1) else { return }
+        let frames = min(l.2, rr.2, 8192)
+        let buf = pl.scratch
+        for f in 0..<frames { buf[f] = (l.0[f * l.1] + rr.0[f * rr.1]) * 0.5 }
+        VoiceFX.process(pl.fx, buf, frames)
+        for target in [pl.fxToChatMic.0, pl.fxToChatMic.1] {
+            guard let o = ptr(outs, target) else { continue }
+            for f in 0..<min(frames, o.2) { o.0[f * o.1] = buf[f] }
+        }
+        let k = pl.fx.pointee.returnGain
+        guard k > 0 else { return }
+        for target in [pl.fxToMixer.0, pl.fxToMixer.1] {
+            guard let o = ptr(outs, target) else { continue }
+            for f in 0..<min(frames, o.2) { o.0[f * o.1] += buf[f] * k }
         }
     }
 

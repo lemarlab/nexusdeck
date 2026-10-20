@@ -1,46 +1,5 @@
 import SwiftUI
 
-/// Routing matrix, ducking and channel names (NexusDeck extras inspired by stream mixers).
-struct MixerToolsWindow: View {
-    @EnvironmentObject var store: ProfileStore
-    @EnvironmentObject var audio: AudioService
-    @State private var tab = 0
-
-    var body: some View {
-        ModalFrame(title: "Strumenti mixer", width: 760, height: 600) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 22) {
-                    tabButton("Instradamento", 0)
-                    tabButton("Ducking", 1)
-                    tabButton("Nomi canali e icone", 2)
-                    Spacer()
-                }
-                .padding(.horizontal, 26).frame(height: 36)
-                Rectangle().fill(Theme.separator.opacity(0.5)).frame(height: 1)
-                ScrollView {
-                    Group {
-                        switch tab {
-                        case 0: RoutingMatrix()
-                        case 1: DuckingPage()
-                        default: ChannelNamesPage()
-                        }
-                    }
-                    .padding(26)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-    }
-
-    private func tabButton(_ t: LocalizedStringKey, _ i: Int) -> some View {
-        Button { tab = i } label: {
-            Text(t).font(.system(size: 12.5, weight: .bold))
-                .foregroundStyle(tab == i ? Theme.accent : Theme.textDim)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 struct RoutingMatrix: View {
     @EnvironmentObject var store: ProfileStore
     @EnvironmentObject var audio: AudioService
@@ -182,27 +141,6 @@ struct DuckingPage: View {
             Text(t).font(.system(size: 12)).foregroundStyle(Theme.textMid).frame(width: 150, alignment: .leading)
             c().frame(width: 320)
             Text(v).font(.system(size: 12, weight: .bold)).frame(width: 70, alignment: .trailing)
-        }
-    }
-}
-
-struct ChannelNamesPage: View {
-    @EnvironmentObject var store: ProfileStore
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Dai un nome e un'icona a ogni canale (per esempio \"Music\" al posto di System). Il nome compare in maiuscolo nell'app e come nome del dispositivo sul Mac. Lascia vuoto per il nome standard.")
-                .font(.system(size: 12)).foregroundStyle(Theme.textDim)
-            ForEach(MixerChannel.allCases) { ch in
-                HStack(spacing: 14) {
-                    IconPicker(selection: Binding(get: { store.mixer.symbol(ch) },
-                                                  set: { store.mixer.channelIcons[ch.rawValue] = $0 == ch.columnSymbol ? nil : $0 }))
-                    Text(ch.title).font(.system(size: 12, weight: .bold)).frame(width: 90, alignment: .leading)
-                    TextField(ch.title, text: Binding(get: { store.mixer.channelNames[ch.rawValue] ?? "" },
-                                                      set: { store.mixer.channelNames[ch.rawValue] = $0.isEmpty ? nil : String($0.prefix(16)) }))
-                        .textFieldStyle(.roundedBorder).frame(width: 240)
-                }
-            }
         }
     }
 }

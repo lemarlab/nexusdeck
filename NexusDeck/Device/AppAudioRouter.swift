@@ -19,6 +19,8 @@ final class AppAudioRouter: ObservableObject {
     /// Apps currently known to Core Audio (grouped by app, helpers included).
     @Published private(set) var apps: [AudioApp] = []
     @Published private(set) var lastError: String?
+    /// The app list is on screen: its "playing" flags are polled (otherwise only list changes refresh it).
+    var showingList = false { didSet { if showingList { refresh() } } }
 
     private let store: ProfileStore
     private var listenerInstalled = false
@@ -74,7 +76,19 @@ final class AppAudioRouter: ObservableObject {
 
     /// Publishes only the devices that are in use: Creator/Audience Mix with Dual Mix, the "(OBS)" inputs with
     /// the OBS tracks mode. Device indices as in the driver's table.
+    /// The NexusDeck devices exist on the Mac only while the mixer is connected.
+    var mixerConnected = false {
+        didSet {
+            guard mixerConnected != oldValue else { return }
+            if mixerConnected { setVisibility(dualMix: lastDual, obsTracks: lastOBS); restoreDefaultOutput() }
+            else { hideAllDevices() }
+        }
+    }
+    private var lastDual = false, lastOBS = false
+
     func setVisibility(dualMix: Bool, obsTracks: Bool) {
+        lastDual = dualMix; lastOBS = obsTracks
+        guard mixerConnected else { wantedMask = 0; sendVisibility(); return }
         var m: UInt32 = 0
         for i in 2...7 { m |= 1 << i }                       // Chat Mic, System, Game, Chat, Line In, Console
         if dualMix { m |= 1 << 0 }                            // Creator Mix
@@ -196,7 +210,7 @@ final class AppAudioRouter: ObservableObject {
         }
         // "Playing" flags change without a list change: poll lightly.
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
+            MainActor.assumeIsolated { if self?.showingList == true { self?.refresh() } }
         }
     }
 

@@ -15,7 +15,6 @@ final class ActionEngine: ObservableObject {
     let youtube = YouTubeClient()
     let spotify = SpotifyClient()
     let discord = DiscordClient()
-    let voicemod = VoicemodClient()
 
     /// Images for widgets that show pictures (OBS previews, Spotify artwork).
     @Published var widgetImages: [UUID: NSImage] = [:]
@@ -37,7 +36,6 @@ final class ActionEngine: ObservableObject {
         youtube.onChange = refresh
         spotify.onChange = refresh
         discord.onChange = refresh
-        voicemod.onChange = refresh
         previewTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in Task { @MainActor in await self?.refreshPreviews() } }
         web.onImage = { [weak self] id, img in self?.widgetImages[id] = img; self?.deck.needsRedraw.send() }
         audio.functionKeyColors = { [weak self] in
@@ -82,10 +80,9 @@ final class ActionEngine: ObservableObject {
         applyBuiltInIntegrations()
     }
 
-    /// Starts or stops Discord / Voicemod according to the switches in the store.
+    /// Discord is built in and always available.
     func applyBuiltInIntegrations() {
         if BuiltInIntegration.discord.isEnabled { discord.start() } else { discord.stop() }
-        if BuiltInIntegration.voicemod.isEnabled { voicemod.start() } else { voicemod.stop() }
         objectWillChange.send()
         syncStates()
     }
@@ -96,8 +93,6 @@ final class ActionEngine: ObservableObject {
         switch key.actionID {
         case ActionID.dcPushToTalk: discord.setMuted(!down)
         case ActionID.dcPushToMute: discord.setMuted(down)
-        case ActionID.vmPlaySound: voicemod.playSound(s.string("sound"), down: down)
-        case ActionID.vmBleep: voicemod.bleep(down)
         case ActionID.cough:
             audio.setCough(down ? MicMuteMode(rawValue: s.int("mode")) ?? .all : nil)
             syncStates()
@@ -219,6 +214,17 @@ final class ActionEngine: ObservableObject {
         case ActionID.dcMute: discord.toggleMute()
         case ActionID.dcDeafen: discord.toggleDeafen()
         case ActionID.micMute: audio.toggleMicMute(MicMuteMode(rawValue: s.int("mode")) ?? .all)
+        case ActionID.appVoice:
+            if s.int("press", 0) == 1 {
+                // Next voice (and on).
+                let n = VoiceFX.voices.count - 1
+                store.dsp.appVoice = store.dsp.appVoiceOn ? store.dsp.appVoice % n + 1 : max(1, store.dsp.appVoice)
+                store.dsp.appVoiceOn = true
+                audio.applyMic()
+            } else {
+                let v = s.int("voice", 0)
+                audio.toggleAppVoice(v > 0 ? v : nil)
+            }
         case ActionID.fxPreset:
             if fxPresetActive(s) {
                 store.dsp.reverbEnabled = false; store.dsp.echoEnabled = false; store.dsp.voiceChanger = .off
@@ -229,23 +235,14 @@ final class ActionEngine: ObservableObject {
                 store.dsp.voiceChanger = VoiceChanger(rawValue: s.int("voice")) ?? .off
             }
             audio.applyDSP()
-        case ActionID.dcPushToTalk, ActionID.dcPushToMute, ActionID.vmPlaySound, ActionID.vmBleep, ActionID.cough, ActionID.bleep:
+        case ActionID.dcPushToTalk, ActionID.dcPushToMute, ActionID.cough, ActionID.bleep:
             // From a multi-action or a click in the editor: a short press.
             hold(key, down: true)
-            try? await Task.sleep(for: .milliseconds(key.actionID == ActionID.vmPlaySound ? 50 : 300))
+            try? await Task.sleep(for: .milliseconds(300))
             hold(key, down: false)
         case ActionID.dcVoiceChannel: discord.toggleVoice(s.string("channel"))
         case ActionID.dcTextChannel: discord.openText(s.string("channel"))
 
-        // Voicemod
-        case ActionID.vmVoice: voicemod.loadVoice(s.string("voice"))
-        case ActionID.vmToggleChanger: voicemod.toggleChanger()
-        case ActionID.vmActivateChanger: voicemod.activateChanger()
-        case ActionID.vmBackground: voicemod.toggleBackground()
-        case ActionID.vmHearMyself: voicemod.toggleHearMyself()
-        case ActionID.vmMute: voicemod.toggleMute()
-        case ActionID.vmMuteForMe: voicemod.toggleMuteForMe()
-        case ActionID.vmStopSounds: voicemod.stopAllSounds()
 
         case ActionID.spPlayURL: await spotify.play(url: s.string("url"))
 
@@ -419,15 +416,6 @@ final class ActionEngine: ObservableObject {
             case ActionID.dcMute: state = discord.muted ? 1 : 0
             case ActionID.dcDeafen: state = discord.deafened ? 1 : 0
             case ActionID.dcVoiceChannel: state = !s.string("channel").isEmpty && discord.voiceChannel == s.string("channel") ? 1 : 0
-            case ActionID.vmToggleChanger: state = voicemod.changerOn ? 1 : 0
-            case ActionID.vmBackground: state = voicemod.backgroundOn ? 1 : 0
-            case ActionID.vmHearMyself: state = voicemod.hearOn ? 1 : 0
-            case ActionID.vmMute: state = voicemod.micMuted ? 1 : 0
-            case ActionID.vmMuteForMe: state = voicemod.muteForMeOn ? 1 : 0
-            case ActionID.vmVoice:
-                if let img = voicemod.image(voice: s.string("voice")) { widgetImages[k.id] = img }
-            case ActionID.vmPlaySound:
-                if let img = voicemod.image(sound: s.string("sound")) { widgetImages[k.id] = img }
             case ActionID.twSubChat: state = twitch.subOnly ? 1 : 0
             case ActionID.twChat: text = twitch.chat.suffix(4).map { "\($0.author): \($0.text)" }.joined(separator: "\n")
             case ActionID.ytWatching: text = "\(youtube.watching)"
@@ -448,6 +436,12 @@ final class ActionEngine: ObservableObject {
                 case .chat: state = store.mixer.chatMicMuted ? 1 : 0
                 }
             case ActionID.fxPreset: state = fxPresetActive(s) ? 1 : 0
+            case ActionID.appVoice:
+                let v = s.int("voice", 0)
+                state = store.dsp.appVoiceActive && (v == 0 || store.dsp.appVoice == v) ? 1 : 0
+                // The key shows the voice it controls.
+                let shown = v > 0 && s.int("press", 0) == 0 ? v : store.dsp.appVoice
+                deck.setLiveText(k.id, state == 1 || v > 0 ? VoiceFX.voices[min(max(shown, 1), VoiceFX.voices.count - 1)].name : "Voce spenta")
             case ActionID.mixSwitch: state = store.mixer.activeMix.rawValue
             case ActionID.muteChannel:
                 let anyMuted = MixBus.allCases.contains { b in MixerChannel.allCases.contains { ch in s.bool("\(b.rawValue).\(ch.rawValue)", ch == .mic) && (store.mixer.mixes[b]?.channels[ch]?.muted ?? false) } }
@@ -477,9 +471,13 @@ final class ActionEngine: ObservableObject {
     }
 
     private func refreshPreviews() async {
-        web.update(keys: deck.keys(onPage: deck.currentPage))
-        web.snapshotAll()
-        guard obs.isConnected else { return }
+        let keys = deck.keys(onPage: deck.currentPage)
+        // Pictures of keys that are no longer on screen are released.
+        let visible = Set(keys.map(\.id))
+        for id in widgetImages.keys where !visible.contains(id) { widgetImages[id] = nil }
+        web.update(keys: keys)
+        if keys.contains(where: { $0.actionID == ActionID.webView }) { web.snapshotAll() }
+        guard obs.isConnected, keys.contains(where: { $0.actionID == ActionID.obsScenePreview || $0.actionID == ActionID.obsStudioPreview }) else { return }
         for k in deck.keys(onPage: deck.currentPage) {
             switch k.actionID {
             case ActionID.obsScenePreview:

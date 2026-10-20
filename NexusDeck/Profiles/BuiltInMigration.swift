@@ -1,18 +1,12 @@
 import Foundation
 
-/// Converts keys made with the vendor Discord / Voicemod packages into the integrations built into NexusDeck,
+/// Converts keys made with the vendor Discord packages (and Voicemod voice keys, to NexusDeck's voice changer) into the integrations built into NexusDeck,
 /// keeping the chosen server/channel, voice and sound.
 @MainActor
 enum BuiltInMigration {
     private static let discordWidgets: [String: String] = [
         "mute": ActionID.dcMute, "deafen": ActionID.dcDeafen, "pushToTalk": ActionID.dcPushToTalk,
         "pushToMute": ActionID.dcPushToMute, "voiceChannel": ActionID.dcVoiceChannel, "textChannel": ActionID.dcTextChannel,
-    ]
-    private static let voicemodWidgets: [String: String] = [
-        "Voicebox": ActionID.vmVoice, "ToggleVoiceChanger": ActionID.vmToggleChanger, "ActivateVoiceChanger": ActionID.vmActivateChanger,
-        "BackgroundEffects": ActionID.vmBackground, "HearMyself": ActionID.vmHearMyself, "Mute": ActionID.vmMute,
-        "MuteForMe": ActionID.vmMuteForMe, "StopAllSoundboard": ActionID.vmStopSounds, "PlaySoundboard": ActionID.vmPlaySound,
-        "BleepOut": ActionID.vmBleep,
     ]
 
     /// Returns the integrations that were used by converted keys.
@@ -32,7 +26,7 @@ enum BuiltInMigration {
         let newID: String?
         let integration: BuiltInIntegration
         if pkg.contains("discord") { newID = discordWidgets[name]; integration = .discord }
-        else if pkg.contains("voicemod") { newID = voicemodWidgets[name]; integration = .voicemod }
+        else if pkg.contains("voicemod") { newID = name == "Voicebox" || name.contains("VoiceChanger") ? ActionID.appVoice : nil; integration = .discord }
         else { return k }
         guard let newID else { return k }
 
@@ -43,13 +37,6 @@ enum BuiltInMigration {
         case ActionID.dcVoiceChannel, ActionID.dcTextChannel:
             settings["server"] = .string(str("target_server"))
             settings["channel"] = .string(str("target_channel"))
-        case ActionID.vmVoice:
-            settings["voice"] = .string(str("target_changer"))
-            settings["voiceName"] = .string(str("target_changer_name"))
-        case ActionID.vmPlaySound:
-            settings["board"] = .string(str("target_profile"))
-            settings["sound"] = .string(str("target_sound"))
-            settings["soundName"] = .string(str("target_sound_name"))
         default: break
         }
         k.actionID = newID

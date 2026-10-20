@@ -126,7 +126,7 @@ struct MicColumn: View {
     }
 
     @ViewBuilder private var micImage: some View {
-        if !store.mixer.micImage.isEmpty, let img = NSImage(contentsOf: ProfileStore.iconFolder.appendingPathComponent(store.mixer.micImage)) {
+        if !store.mixer.micImage.isEmpty, let img = ImageCache.image(at: ProfileStore.iconFolder.appendingPathComponent(store.mixer.micImage)) {
             Image(nsImage: img).resizable().scaledToFit()
         } else {
             MicIllustration()
@@ -183,13 +183,24 @@ struct MicEffectsPanel: View {
             store.dsp.noiseGateEnabled = true
             store.dsp.noiseGate.closeThreshold = close
             store.dsp.noiseGate.openThreshold = close + 6
-            audio.applyDSP()
+            audio.applyGate()
         }
     }
 
     private func apply() {
         applyTask?.cancel()
-        applyTask = Task { try? await Task.sleep(for: .milliseconds(200)); if !Task.isCancelled { audio.applyDSP() } }
+        // Only the block of the effect being edited is sent, right away (the full set takes a few seconds).
+        let tab = ui.micTab
+        applyTask = Task {
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled else { return }
+            switch tab {
+            case .reverb, .echo: audio.applyReverb()
+            case .equalizer: audio.applyEQ()
+            case .noiseGate: audio.applyGate()
+            case .compressor: audio.applyCompressor()
+            }
+        }
     }
 
     private func dsp<T>(_ kp: WritableKeyPath<DSPProfile, T>) -> Binding<T> {

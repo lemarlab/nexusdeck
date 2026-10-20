@@ -18,7 +18,6 @@ enum DebugSnapshot {
                     var f = win.frame; f.size = NSSize(width: w, height: h); win.setFrame(f, display: true); return
                 }
                 if parts.first == "settings" { ui.settingsPage = parts.count > 1 ? SettingsPage(rawValue: parts[1]) : nil; return }
-                if parts.first == "store" { ui.showStore = parts.count > 1 && parts[1] == "1"; return }
                 if parts.first == "action", parts.count > 1 {
                     if let k = deck.store.hotkey.keys.first(where: { $0.actionID == parts[1] }) { editor.selectedKey = k.id; editor.selectedKnob = nil }
                     return

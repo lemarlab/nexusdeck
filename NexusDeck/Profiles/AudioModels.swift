@@ -165,6 +165,8 @@ struct Reverb: Codable, Hashable {
     var gain: Double = -8
     var wetGain: Double = 0
     var time: Double = 1
+    /// "mode" of the reference profiles (weights the early diffusion).
+    var mode: Double = 0
 }
 
 struct Echo: Codable, Hashable {
@@ -213,6 +215,10 @@ struct DSPProfile: Codable, Identifiable, Hashable {
     var noiseGateEnabled = true
     var noiseGate = NoiseGate()
     var voiceChanger: VoiceChanger = .off
+    /// NexusDeck voice changer (software): selected voice (VoiceFX.voices) and whether it is on.
+    var appVoice: Int = 1
+    var appVoiceOn = false
+    var appVoiceActive: Bool { appVoiceOn && appVoice > 0 }
 
     static let defaultFrequencies: [Double] = [50, 100, 250, 500, 1000, 4000, 8000, 16000]
 

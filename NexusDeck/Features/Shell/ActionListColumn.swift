@@ -7,7 +7,7 @@ struct ActionTile: View {
     var height: CGFloat = 36
 
     var body: some View {
-        if let f = descriptor.iconFile, let img = NSImage(contentsOfFile: f) {
+        if let f = descriptor.iconFile, let img = ImageCache.image(atPath: f) {
             Image(nsImage: img).resizable().scaledToFit().frame(width: width, height: height).background(Color.black)
         } else {
             VStack(spacing: 1) {
@@ -36,7 +36,6 @@ struct ActionListColumn: View {
     @ObservedObject private var packages = PackageManager.shared
     // Re-render when built-in integrations are switched on or off.
     @AppStorage(BuiltInIntegration.discord.defaultsKey) private var discordOn = false
-    @AppStorage(BuiltInIntegration.voicemod.defaultsKey) private var voicemodOn = false
 
     private let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
 
@@ -130,7 +129,7 @@ struct ActionIcon: View {
     var size: CGFloat = 28
     var body: some View {
         Group {
-            if let f = descriptor.iconFile, let img = NSImage(contentsOfFile: f) {
+            if let f = descriptor.iconFile, let img = ImageCache.image(atPath: f) {
                 Image(nsImage: img).resizable().scaledToFit().background(Color.black)
             } else {
                 let hex = Theme.tileHex(for: descriptor.id)

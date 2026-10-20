@@ -7,6 +7,7 @@ enum ActionID {
     static let cough = "mixer.cough"
     static let bleep = "mixer.bleep"
     static let fxPreset = "mixer.fxPreset"
+    static let appVoice = "mixer.appVoice"
     static let mixSwitch = "mixer.mixSwitch"
     static let muteChannel = "mixer.mute"
     static let soundboardPlay = "mixer.soundboard.play"
@@ -94,16 +95,6 @@ enum ActionID {
     static let dcVoiceChannel = "discord.voiceChannel"
     static let dcTextChannel = "discord.textChannel"
 
-    static let vmVoice = "voicemod.voice"
-    static let vmToggleChanger = "voicemod.toggleChanger"
-    static let vmActivateChanger = "voicemod.activateChanger"
-    static let vmBackground = "voicemod.background"
-    static let vmHearMyself = "voicemod.hearMyself"
-    static let vmMute = "voicemod.mute"
-    static let vmMuteForMe = "voicemod.muteForMe"
-    static let vmPlaySound = "voicemod.playSound"
-    static let vmStopSounds = "voicemod.stopSounds"
-    static let vmBleep = "voicemod.bleep"
 
     static let spPlayURL = "spotify.playURL"
     static let spPlay = "spotify.play"
@@ -152,6 +143,7 @@ enum ActionCatalog {
             .init(id: ActionID.micMute, title: "Muto microfono", symbol: "mic.slash.fill", stateTitles: ["Mic", "Mic muto"], stateSymbols: ["mic.fill", "mic.slash.fill"]),
             .init(id: ActionID.cough, title: "Tasto tosse", symbol: "hand.raised.fill"),
             .init(id: ActionID.bleep, title: "Bip censura", symbol: "exclamationmark.bubble.fill"),
+            .init(id: ActionID.appVoice, title: "Voice changer", symbol: "theatermasks.fill", stateTitles: ["Voce", "Voce on"]),
             .init(id: ActionID.fxPreset, title: "Preset effetti voce", symbol: "wand.and.stars", stateTitles: ["Effetti off", "Effetti on"]),
             .init(id: ActionID.mixSwitch, title: "Cambia mix", symbol: "arrow.left.arrow.right", stateTitles: ["Mix 1", "Mix 2"]),
             .init(id: ActionID.muteChannel, title: "Muto", symbol: "speaker.slash.fill", stateTitles: ["Muto off", "Muto"], stateSymbols: ["speaker.wave.2.fill", "speaker.slash.fill"]),
@@ -249,18 +241,6 @@ enum ActionCatalog {
             .init(id: ActionID.dcVoiceChannel, title: "Canale vocale", symbol: "speaker.wave.2.bubble.left.fill", stateTitles: ["Entra", "Connesso"], stateSymbols: ["speaker.wave.2.bubble.left", "speaker.wave.2.bubble.left.fill"]),
             .init(id: ActionID.dcTextChannel, title: "Canale testuale", symbol: "number"),
         ]),
-        ActionCategory(id: "voicemod", title: "Voicemod", symbol: "waveform.and.mic", actions: [
-            .init(id: ActionID.vmVoice, title: "Voce", symbol: "person.wave.2.fill"),
-            .init(id: ActionID.vmToggleChanger, title: "Cambia voce on/off", symbol: "waveform.and.mic", stateTitles: ["Voce off", "Voce on"], stateSymbols: ["waveform.slash", "waveform.and.mic"]),
-            .init(id: ActionID.vmActivateChanger, title: "Attiva cambio voce", symbol: "waveform.badge.plus"),
-            .init(id: ActionID.vmBackground, title: "Effetti di sottofondo", symbol: "cloud.rain.fill", stateTitles: ["Sottofondo off", "Sottofondo on"]),
-            .init(id: ActionID.vmHearMyself, title: "Ascolta te stesso", symbol: "ear", stateTitles: ["Ascolto off", "Ascolto on"], stateSymbols: ["ear.trianglebadge.exclamationmark", "ear"]),
-            .init(id: ActionID.vmMute, title: "Muto", symbol: "mic.slash.fill", stateTitles: ["Microfono", "Muto"], stateSymbols: ["mic.fill", "mic.slash.fill"]),
-            .init(id: ActionID.vmMuteForMe, title: "Suoni solo per gli altri", symbol: "speaker.slash", stateTitles: ["Li sento", "Non li sento"], stateSymbols: ["speaker.wave.2", "speaker.slash"]),
-            .init(id: ActionID.vmPlaySound, title: "Suono", symbol: "play.circle.fill"),
-            .init(id: ActionID.vmStopSounds, title: "Ferma tutti i suoni", symbol: "stop.circle.fill"),
-            .init(id: ActionID.vmBleep, title: "Bip censura", symbol: "exclamationmark.bubble.fill"),
-        ]),
         ActionCategory(id: "spotify", title: "Spotify", symbol: "music.note", actions: [
             .init(id: ActionID.spPlay, title: "Play/Pausa", symbol: "playpause.fill", stateTitles: ["Pausa", "Play"]),
             .init(id: ActionID.spPlayURL, title: "Riproduci URL", symbol: "link"),
@@ -282,7 +262,7 @@ enum ActionCatalog {
     }
 
     /// Actions that react to press and release separately (hold to use).
-    static let holdActions: Set<String> = [ActionID.dcPushToTalk, ActionID.dcPushToMute, ActionID.vmPlaySound, ActionID.vmBleep, ActionID.cough, ActionID.bleep]
+    static let holdActions: Set<String> = [ActionID.dcPushToTalk, ActionID.dcPushToMute, ActionID.cough, ActionID.bleep]
 
     @MainActor static func descriptor(_ id: String) -> ActionDescriptor {
         if let d = all[id] { return d }
@@ -306,16 +286,14 @@ enum ActionCatalog {
 }
 
 /// Integrations built into NexusDeck that the user can switch on or off (no download).
+/// Integrations built into NexusDeck (always on).
 enum BuiltInIntegration: String, CaseIterable, Identifiable {
-    case discord, voicemod
+    case discord
     var id: String { rawValue }
     var defaultsKey: String { "integration.\(rawValue).enabled" }
-    var isEnabled: Bool { UserDefaults.standard.bool(forKey: defaultsKey) }
-    var title: String { self == .discord ? "Discord" : "Voicemod" }
-    var symbol: String { self == .discord ? "bubble.left.and.bubble.right.fill" : "waveform.and.mic" }
-    var summary: String {
-        self == .discord ? "Muto, audio, premi per parlare e canali vocali e testuali di Discord."
-                         : "Cambio voce, effetti, soundboard e muto di Voicemod."
-    }
-    var color: String { self == .discord ? "#5865F2" : "#00C2B2" }
+    var isEnabled: Bool { true }
+    var title: String { "Discord" }
+    var symbol: String { "bubble.left.and.bubble.right.fill" }
+    var summary: String { "Muto, audio, premi per parlare e canali vocali e testuali di Discord." }
+    var color: String { "#5865F2" }
 }

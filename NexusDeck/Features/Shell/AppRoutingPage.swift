@@ -46,6 +46,8 @@ struct AppRoutingPage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear { router.showingList = true }
+        .onDisappear { router.showingList = false }
     }
 
     /// Running audio apps plus routed apps that are closed (their route is kept).

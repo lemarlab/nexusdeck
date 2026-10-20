@@ -100,7 +100,8 @@ static float* gSide[kPairCount];
 #define kRouteSelector   'ndrt'
 /// Visible devices currently published (bit = device index). Hidden bridges are always published.
 #define kVisibleSelector 'ndvm'
-static _Atomic UInt32 gVisibleMask = 0xFFFFFFFFu;
+// Until NexusDeck says otherwise (mixer connected) no visible device is published.
+static _Atomic UInt32 gVisibleMask = 0;
 static inline bool IsPublished(UInt32 i) { return kDevices[i].hidden || ((atomic_load(&gVisibleMask) >> i) & 1u); }
 /// Custom device names set by NexusDeck ('ndnm': "index=name\n..."); empty = default name.
 #define kNamesSelector 'ndnm'

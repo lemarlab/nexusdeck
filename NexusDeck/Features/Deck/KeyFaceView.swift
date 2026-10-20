@@ -26,7 +26,7 @@ struct KeyImage: View {
     /// Built-in symbols leave room for the title below, as in the reference layout (50×50 icon in a 150×108 key).
     var hasTitle = true
     var body: some View {
-        if ref.hasPrefix("file:"), let img = NSImage(contentsOfFile: String(ref.dropFirst(5))) {
+        if ref.hasPrefix("file:"), let img = ImageCache.image(atPath: String(ref.dropFirst(5))) {
             Image(nsImage: img).resizable().scaledToFit()
         } else if ref.hasPrefix("sf:") {
             GeometryReader { g in
@@ -37,7 +37,7 @@ struct KeyImage: View {
                     .frame(width: side, height: side)
                     .position(x: g.size.width / 2, y: g.size.height * (hasTitle ? 0.38 : 0.5))
             }
-        } else if !ref.isEmpty, let img = NSImage(contentsOf: ProfileStore.iconFolder.appendingPathComponent(ref)) {
+        } else if !ref.isEmpty, let img = ImageCache.image(at: ProfileStore.iconFolder.appendingPathComponent(ref)) {
             Image(nsImage: img).resizable().scaledToFill()
         } else {
             Color.clear

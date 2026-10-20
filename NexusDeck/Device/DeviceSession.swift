@@ -56,8 +56,15 @@ final class DeviceSession {
         }.store(in: &bag)
         devices.$state.sink { [weak self] s in if !s.isConnected { self?.detach() } }.store(in: &bag)
         // Live input levels on the Mixer Dashboard (only when one is on screen with its indicator on).
+        // Moving the window: no panel redraws until it stops (they run on the main thread).
+        NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.windowMovedAt = Date() }
+        }
+        NotificationCenter.default.addObserver(forName: NSWindow.willMoveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.windowMovedAt = Date() }
+        }
         audio.$meters
-            .throttle(for: .milliseconds(400), scheduler: RunLoop.main, latest: true)
+            .throttle(for: .milliseconds(700), scheduler: RunLoop.main, latest: true)
             .sink { [weak self] _ in
                 guard let self, Date().timeIntervalSince(self.lastKnobActivity) > 1 else { return }
                 if self.deck.keys(onPage: self.deck.currentPage).contains(where: { $0.actionID == ActionID.mixerDashboard && $0.settings.bool("input", true) }) {
@@ -79,6 +86,7 @@ final class DeviceSession {
     private func attach(_ hid: HIDDevice) {
         let c = AXController(hid: hid)
         lastFrame = nil
+        lastSignature = nil
         // Nothing is drawn on the panel before the welcome animation.
         introUntil = .distantFuture
         ignoreKnobsUntil = .distantFuture
@@ -164,6 +172,8 @@ final class DeviceSession {
     }
 
     private func detach() {
+        deck.deviceReady = false
+        introUntil = .distantPast
         controller = nil
         audio.controller = nil
         deviceBag.removeAll()
@@ -185,6 +195,7 @@ final class DeviceSession {
     /// While the page slide is being sent, normal redraws wait (they would replace the queued frames).
     private var animatingUntil = Date.distantPast
     private var pageAnimation: Task<Void, Never>?
+    private var lastPageAnimation = Date.distantPast
 
     /// Sends a few light frames of the old page sliding out and the new one sliding in, then the final page.
     private func animatePage(from: Int, to: Int) {
@@ -192,18 +203,38 @@ final class DeviceSession {
         let forward = deck.pageForward
         animatingUntil = Date().addingTimeInterval(1.5)
         pageAnimation?.cancel()
+        // Swiping fast: skip the slide (it would only pile up frames) and show the page.
+        if Date().timeIntervalSince(lastPageAnimation) < 0.6 {
+            lastPageAnimation = Date()
+            animatingUntil = .distantPast
+            lastSignature = nil
+            redraw()
+            return
+        }
+        lastPageAnimation = Date()
+        // Three pictures drawn once (background, old page, new page); the slide frames are composed from them
+        // with Core Graphics off the main thread (much lighter than drawing every frame with SwiftUI).
+        let images = engine.widgetImages
+        guard let bg = PanelRenderer.layer(deck: deck, store: store, images: images, page: -1, background: true),
+              let old = PanelRenderer.layer(deck: deck, store: store, images: images, page: from, background: false),
+              let new = PanelRenderer.layer(deck: deck, store: store, images: images, page: to, background: false),
+              let finalImage = PanelRenderer.image(deck: deck, store: store, images: images, touched: nil) else {
+            animatingUntil = .distantPast; return
+        }
         pageAnimation = Task { @MainActor in
-            for t: CGFloat in [0.2, 0.45, 0.7, 0.88] {
-                let eased = 1 - pow(1 - t, 2)
-                if let f = PanelRenderer.transitionJPEG(deck: deck, store: store, images: engine.widgetImages,
-                                                        from: from, to: to, forward: forward, progress: eased, quality: 0.3) {
-                    if Task.isCancelled { return }
-                    c.append(jpeg: f)
+            let frames: [Data] = await Task.detached(priority: .userInitiated) {
+                var out: [Data] = []
+                for t: CGFloat in [0.2, 0.45, 0.7, 0.88] {
+                    let p = 1 - pow(1 - t, 2)
+                    if let f = PanelRenderer.slide(bg: bg, old: old, new: new, forward: forward, progress: p),
+                       let j = PanelRenderer.encode(f, quality: 0.3) { out.append(j) }
                 }
-                await Task.yield()
-            }
+                if let j = PanelRenderer.encode(finalImage, quality: 0.8) { out.append(j) }
+                return out
+            }.value
             if Task.isCancelled { return }
-            if let final = PanelRenderer.jpeg(deck: deck, store: store, images: engine.widgetImages, touched: nil) {
+            for f in frames.dropLast() { c.append(jpeg: f) }
+            if let final = frames.last {
                 lastFrame = final
                 lastPush = Date()
                 c.append(jpeg: final)
@@ -229,7 +260,7 @@ final class DeviceSession {
             Thread.sleep(forTimeInterval: 1)
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.introUntil = .distantPast; self.lastFrame = nil; self.redraw()
+                self.introUntil = .distantPast; self.lastFrame = nil; self.lastSignature = nil; self.redraw()
                 // Simulated update: the new version is shown (until the app restarts and reads the real one).
                 if let newVersion {
                     DeviceSession.firmwareTestDone = true
@@ -239,8 +270,50 @@ final class DeviceSession {
         }
     }
 
+    private var windowMovedAt = Date.distantPast
+    private var lastSignature: Int?
+    private var frameGeneration = 0
+    private let encodeQueue = DispatchQueue(label: "nexusdeck.panel.encode", qos: .userInitiated)
+
+    /// Hash of everything the panel image depends on.
+    private func panelSignature(turning: Bool) -> Int {
+        var h = Hasher()
+        let keys = deck.keys(onPage: deck.currentPage)
+        h.combine(keys)
+        h.combine(deck.currentPage)
+        h.combine(deck.panelOn)
+        h.combine(turning)
+        h.combine(showPressed ? touchedKey : nil)
+        for k in keys {
+            h.combine(deck.stateIndex[k.id])
+            h.combine(deck.liveText[k.id])
+            if let img = engine.widgetImages[k.id] { h.combine(ObjectIdentifier(img)) }
+            if k.actionID == ActionID.mixerDashboard {
+                h.combine(store.mixer)
+                // Live input rings: steps of 1/8, so tiny level changes do not cost a new frame.
+                if k.settings.bool("input", true) {
+                    for b in MixBus.allCases { for ch in MixerChannel.allCases { h.combine((LevelMeters.shared.values[b]?[ch] ?? 0) / 12) } }
+                }
+            }
+            if k.actionID == ActionID.volume || k.actionID == ActionID.pageIndicator { h.combine(store.mixer); h.combine(store.hotkey.pageCount) }
+        }
+        let d = store.library.device
+        h.combine(d.background)
+        h.combine(d.panelOpacity)
+        h.combine(d.autoHideGrid)
+        h.combine(d.ledKnob)
+        return h.finalize()
+    }
+
     func redraw() {
         guard let c = controller, Date() >= introUntil else { return }
+        if Date().timeIntervalSince(windowMovedAt) < 0.35 {
+            if !redrawDeferred {
+                redrawDeferred = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.redrawDeferred = false; self?.redraw() }
+            }
+            return
+        }
         // A touch on the panel wins over the page slide still being sent (the press must show at once).
         if touchStart != nil || showPressed { animatingUntil = .distantPast; pageAnimation?.cancel() }
         if Date() < animatingUntil {
@@ -266,12 +339,25 @@ final class DeviceSession {
             lastFunctionKeyColors = colors
             Task { await audio.sendFunctionKeyLEDs() }
         }
-        if let jpeg = PanelRenderer.jpeg(deck: deck, store: store, images: engine.widgetImages, touched: showPressed ? touchedKey : nil, quality: turning ? 0.45 : 0.8) {
-            // An unchanged frame is not sent again: every frame keeps the mixer busy (and slows its knobs).
-            guard jpeg != lastFrame else { return }
-            lastFrame = jpeg
-            lastPush = Date()
-            c.push(jpeg: jpeg)
+        // Cheap check before the (expensive) render: nothing drawn on the panel changed → nothing to do.
+        let signature = panelSignature(turning: turning)
+        if signature == lastSignature { return }
+        lastSignature = signature
+        // Drawn here (SwiftUI), compressed off the main thread, sent in order.
+        guard let cg = PanelRenderer.image(deck: deck, store: store, images: engine.widgetImages, touched: showPressed ? touchedKey : nil) else { return }
+        let quality: CGFloat = turning ? 0.45 : 0.8
+        let generation = frameGeneration &+ 1
+        frameGeneration = generation
+        lastPush = Date()
+        encodeQueue.async { [weak self] in
+            guard let jpeg = PanelRenderer.encode(cg, quality: quality) else { return }
+            DispatchQueue.main.async {
+                guard let self, self.frameGeneration == generation, self.controller === c else { return }
+                // An unchanged frame is not sent again: every frame keeps the mixer busy (and slows its knobs).
+                guard jpeg != self.lastFrame else { return }
+                self.lastFrame = jpeg
+                c.push(jpeg: jpeg)
+            }
         }
     }
 

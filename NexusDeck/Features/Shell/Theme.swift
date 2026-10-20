@@ -30,17 +30,12 @@ enum Theme {
     static let devicePlate = Color(hex: "#43403E")
     static let bezel = Color(hex: "#1E1E1E")
     static let knobBlue = Color(hex: "#007DFF")
-    static let tilePurple = Color(hex: "#352994")
-    static let tileBlue = Color(hex: "#3D9BE9")
     static let settingsBg = Color.dynamic(light: "#F5F5F7", dark: "#1E1E20")
     static let settingsMenuSel = selection
     static let settingsFooter = Color.dynamic(light: "#ECECEF", dark: "#252527")
     static let button = Color.dynamic(light: "#E5E5EA", dark: "#2C2C2E")
     static let effectsPanel = canvas
     static let sliderCard = card
-    static let deviceBlue = Color(hex: "#000826")
-    static let deviceRed = Color(hex: "#0A0000")
-    static let knobBlueLegacy = Color(hex: "#2F8CFF")
     static let deviceBezel = bezel
 
     // Metrics
@@ -69,7 +64,6 @@ enum Theme {
         case "youtube": "#E62117"
         case "twitch": "#9146FF"
         case "discord": "#5865F2"
-        case "voicemod": "#00A88E"
         case "spotify": "#1DB954"
         case "pkg": "#3A3A3C"
         default: "#5E5CE6"
@@ -87,7 +81,6 @@ enum Theme {
         case "youtube": "#E62117"
         case "spotify": "#1DB954"
         case "discord": "#5865F2"
-        case "voicemod": "#00A88E"
         case "pkg": "#3A3A3C"
         default: "#5E5CE6"
         }

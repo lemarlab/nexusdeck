@@ -73,7 +73,6 @@ struct ActionSettingsView: View {
     @EnvironmentObject var engine: ActionEngine
     @EnvironmentObject var obs: OBSClient
     @EnvironmentObject var discord: DiscordClient
-    @EnvironmentObject var voicemod: VoicemodClient
     @EnvironmentObject var editor: DeckEditorModel
 
     var body: some View {
@@ -119,6 +118,14 @@ struct ActionSettingsView: View {
             DropdownRowField(title: "Uscita", selection: s.string("output", "NexusDeck.System"),
                              options: SystemAudio.outputDevices().map { ($0.uid, $0.name) })
             Slider(value: s.double("volume", 0.6), in: 0...1) { Text("Volume") }
+        case ActionID.appVoice:
+            DropdownRowField(title: "Al tocco", selection: s.int("press", 0),
+                             options: [(0, "Accendi / spegni"), (1, "Voce successiva")])
+            if s.wrappedValue.int("press", 0) == 0 {
+                DropdownRowField(title: "Voce", selection: s.int("voice", 0),
+                                 options: [(0, "Ultima scelta")] + VoiceFX.voices.enumerated().dropFirst().map { ($0.offset, $0.element.name) })
+            }
+            Text("La voce filtrata arriva su [AM-IN] Chat Mic, in diretta e in cuffia con il Monitor acceso. Il tasto mostra la voce attiva.").foregroundStyle(.secondary)
         case ActionID.fxPreset:
             Toggle("Riverbero", isOn: s.bool("reverb", true))
             if s.wrappedValue.bool("reverb", true) {
@@ -276,20 +283,6 @@ struct ActionSettingsView: View {
             DropdownRowField(title: "Canale", selection: s.string("channel"),
                              options: list.map { ($0.id, (voice ? "🔊 " : "# ") + $0.name) } + (channel.isEmpty || list.contains { $0.id == channel } ? [] : [(channel, "Canale salvato")]))
                 .onAppear { discord.loadGuilds(); discord.loadChannels(server) }
-        case ActionID.vmVoice:
-            if !voicemod.connected { Text("Apri Voicemod e inserisci la API Key in Impostazioni → Collega app.").foregroundStyle(.secondary) }
-            let v = s.wrappedValue.string("voice")
-            DropdownRowField(title: "Voce", selection: s.string("voice"),
-                             options: voicemod.voices.map { ($0.id, $0.name) } + (v.isEmpty || voicemod.voices.contains { $0.id == v } ? [] : [(v, s.wrappedValue.string("voiceName", "Voce salvata"))]))
-        case ActionID.vmPlaySound:
-            if !voicemod.connected { Text("Apri Voicemod e inserisci la API Key in Impostazioni → Collega app.").foregroundStyle(.secondary) }
-            let board = s.wrappedValue.string("board")
-            DropdownRowField(title: "Soundboard", selection: Binding(get: { board }, set: { s.wrappedValue["board"] = .string($0); s.wrappedValue["sound"] = .string("") }),
-                             options: voicemod.soundboards.map { ($0.name, $0.name) } + (board.isEmpty || voicemod.soundboards.contains { $0.name == board } ? [] : [(board, board)]))
-            let sounds = voicemod.soundboards.first { $0.name == board }?.sounds ?? []
-            let snd = s.wrappedValue.string("sound")
-            DropdownRowField(title: "Suono", selection: s.string("sound"),
-                             options: sounds.map { ($0.id, $0.name) } + (snd.isEmpty || sounds.contains { $0.id == snd } ? [] : [(snd, s.wrappedValue.string("soundName", "Suono salvato"))]))
         case ActionID.group:
             Text("Tocca la cartella sul pannello (o doppio clic qui) per aprirla e riempirla.").foregroundStyle(.secondary)
             Button("Apri cartella") { if let p = s.wrappedValue["groupPage"]?.int { engine.deck.enterFolder(p) } }

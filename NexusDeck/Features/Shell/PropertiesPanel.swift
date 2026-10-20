@@ -28,15 +28,6 @@ struct PropertiesPanel: View {
                     .font(.system(size: 12)).foregroundStyle(Theme.textFaint).multilineTextAlignment(.center).padding(.horizontal, 30).padding(.top, 2)
                 Spacer()
             }
-        } else {
-            if let k = ui.mixerKnob {
-                ChannelPanel(channel: MixerChannel.allCases[k])
-            } else {
-                PanelHeader(title: store.mixer.dualMix ? store.mixer.activeMix.title : "Master Mix")
-                Spacer()
-                Text("Clicca una manopola per configurarne l'azione.").font(.system(size: 12.5, weight: .bold)).foregroundStyle(Theme.textDim)
-                Spacer()
-            }
         }
     }
 }
@@ -250,46 +241,5 @@ struct TextEditPopover: View {
     private func align(_ symbol: String, _ a: KeyTitleStyle.HAlign) -> some View {
         Button { style.textAlignment = a } label: { Image(systemName: symbol) }
             .buttonStyle(.plain).foregroundStyle(style.textAlignment == a ? Theme.accent : Theme.text)
-    }
-}
-
-// MARK: - Mixer channel panel
-
-struct ChannelPanel: View {
-    let channel: MixerChannel
-    @EnvironmentObject var store: ProfileStore
-    @EnvironmentObject var audio: AudioService
-    @EnvironmentObject var engine: ActionEngine
-
-    var body: some View {
-        let bus: MixBus = store.mixer.dualMix ? store.mixer.activeMix : .creator
-        let s = store.mixer.mixes[bus]?.channels[channel] ?? ChannelState()
-        VStack(spacing: 0) {
-            PanelHeader(title: "\(store.mixer.dualMix ? bus.title : "Master Mix") - \(store.mixer.name(channel))")
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 12) {
-                    Text(store.mixer.name(channel)).font(Theme.small).frame(width: 70, alignment: .leading)
-                    ThinSlider(value: Binding(get: { Double(s.level) }, set: { audio.setLevel(channel, bus: bus, Int($0)); engine.syncStates() }), knob: .square)
-                        .frame(width: 260)
-                    Text("\(s.level)").font(Theme.small).monospacedDigit().frame(width: 28)
-                    Button { audio.toggleMute(channel, bus: bus); engine.syncStates() } label: {
-                        Image(systemName: s.muted ? "speaker.slash.fill" : "speaker.wave.2.fill").foregroundStyle(s.muted ? .red : Theme.textDim)
-                    }.buttonStyle(.plain)
-                }
-                HStack(spacing: 12) {
-                    Text("Picco").font(Theme.small).foregroundStyle(Theme.textDim).frame(width: 70, alignment: .leading)
-                    GeometryReader { g in
-                        ZStack(alignment: .leading) {
-                            Rectangle().fill(Color.black)
-                            Rectangle().fill(Color.green).frame(width: g.size.width * CGFloat(audio.meters[bus]?[channel] ?? 0) / 100)
-                        }
-                    }
-                    .frame(width: 260, height: 3)
-                }
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Spacer()
-        }
     }
 }

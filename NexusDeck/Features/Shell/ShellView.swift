@@ -1,5 +1,9 @@
 import SwiftUI
 
+extension Notification.Name {
+    static let nexusRetryMixer = Notification.Name("NexusDeck.retryMixer")
+}
+
 enum MainSection: String, CaseIterable {
     case hotkeys, mixer, mic, apps, matrix, ducking, obs
 
@@ -114,12 +118,14 @@ final class UIState: ObservableObject {
     @Published var section: MainSection = .hotkeys
     @Published var sidebarExpanded = false
     @Published var settingsPage: SettingsPage?
-    @Published var showStore = false
     @Published var showImport = false
-    @Published var showRouting = false
-    @Published var showMixerTools = false
     /// While the mixer is being set up at launch the window is blurred.
     @Published var loading = true
+    /// Mixer link shown over the window: connecting (start), reconnecting (cable unplugged), not found (error).
+    enum Link: Equatable { case connecting, reconnecting, notFound }
+    @Published var link: Link = .connecting
+    /// The user chose to keep working without the mixer.
+    @Published var dismissedNotFound = false
     /// Quitting: the loading overlay says the mixer is being disconnected.
     @Published var closing = false
     @Published var micTab: MicEffectTab = .noiseGate
@@ -147,26 +153,35 @@ struct ShellView: View {
             }
         }
         .blur(radius: ui.loading ? 22 : 0)
+        // Nothing behind the overlay can be used while it is shown.
+        .allowsHitTesting(!ui.loading)
         .overlay {
             if ui.loading {
-                VStack(spacing: 16) {
-                    Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 96, height: 96)
-                    ProgressView().controlSize(.small)
-                    Text(ui.closing ? "Scollegamento dal mixer…" : "Collegamento al mixer…").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.textDim)
+                ZStack {
+                    // Catches every click and drag outside the message.
+                    Color.black.opacity(0.001).contentShape(Rectangle())
+                        .onTapGesture {}
+                        .gesture(DragGesture(minimumDistance: 0))
+                // One card for every state: its content changes, the card stays.
+                MixerLinkCard(link: ui.closing ? nil : ui.link) {
+                    ui.link = .connecting; NotificationCenter.default.post(name: .nexusRetryMixer, object: nil)
+                }
                 }
                 .transition(.opacity)
             }
         }
+        .animation(.easeOut(duration: 0.3), value: ui.link)
         .animation(.easeOut(duration: 0.5), value: ui.loading)
         .ignoresSafeArea()
         .background(Theme.window)
         .foregroundStyle(Theme.text)
         .tint(Theme.accent)
+        // Open windows (settings, store…) close when the mixer link is lost.
+        .onChange(of: ui.loading) { _, blocked in
+            if blocked && !ui.closing { ui.settingsPage = nil; ui.showImport = false; updater.showSheet = false }
+        }
         .sheet(item: $ui.settingsPage) { _ in SettingsWindow() }
-        .sheet(isPresented: $ui.showStore) { StoreWindow() }
         .sheet(isPresented: $ui.showImport) { ImportWindow() }
-        .sheet(isPresented: $ui.showRouting) { RoutingTableWindow() }
-        .sheet(isPresented: $ui.showMixerTools) { MixerToolsWindow() }
         .sheet(isPresented: $updater.showSheet) { UpdateSheet() }
         .sheet(isPresented: Binding(get: { !store.library.tutorialDone }, set: { if !$0 { store.library.tutorialDone = true } })) { TutorialView() }
     }
@@ -192,6 +207,62 @@ struct ShellView: View {
         case .matrix: PageScroll { RoutingMatrix() }
         case .ducking: PageScroll { DuckingPage() }
         case .obs: PageScroll { OBSTracksPage() }
+        }
+    }
+}
+
+/// The mixer link message: connecting / reconnecting / disconnecting (spinner) or not found (warning, Retry).
+struct MixerLinkCard: View {
+    /// nil = quitting.
+    let link: UIState.Link?
+    let retry: () -> Void
+
+    var body: some View {
+        let failed = link == .notFound
+        VStack(spacing: 14) {
+            ZStack(alignment: .bottomTrailing) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 96, height: 96).opacity(failed ? 0.55 : 1)
+                if failed {
+                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 30))
+                        .symbolRenderingMode(.palette).foregroundStyle(.white, .orange)
+                        .shadow(color: .black.opacity(0.3), radius: 3).offset(x: 6, y: 6)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+            Text(title).font(.system(size: 17, weight: .bold))
+            if failed {
+                Text("NexusDeck funziona solo con il mixer collegato.\nCollega l'AX310 al Mac con il cavo USB: si ricollegherà da solo.")
+                    .font(.system(size: 12.5)).foregroundStyle(Theme.textDim).multilineTextAlignment(.center)
+                FlatButton(title: "Riprova", prominent: true, width: 120, action: retry).padding(.top, 4)
+            } else {
+                ProgressView().controlSize(.small).padding(.top, 2)
+                Text(subtitle).font(.system(size: 12.5)).foregroundStyle(Theme.textDim).multilineTextAlignment(.center)
+            }
+        }
+        .frame(width: 380)
+        .padding(.vertical, 28)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Theme.cardBorder, lineWidth: 1))
+        .shadow(color: .black.opacity(0.25), radius: 20, y: 8)
+        .animation(.easeOut(duration: 0.25), value: link)
+    }
+
+    private var title: LocalizedStringKey {
+        switch link {
+        case nil: "Scollegamento dal mixer…"
+        case .connecting: "Collegamento al mixer…"
+        case .reconnecting: "Riconnessione in corso…"
+        case .notFound: "Mixer non trovato"
+        }
+    }
+
+    private var subtitle: LocalizedStringKey {
+        switch link {
+        case nil: "Spegnimento delle luci e del display."
+        case .connecting: "Invio della configurazione al mixer."
+        case .reconnecting: "Il cavo USB è stato scollegato: in attesa del mixer."
+        case .notFound: ""
         }
     }
 }
@@ -428,7 +499,6 @@ struct Sidebar: View {
             group("Audio")
             item(.apps); item(.matrix); item(.ducking); item(.obs)
             group("Altro")
-            row("puzzlepiece.extension.fill", "Widget", tint: "#34C759") { ui.showStore = true }
             row("square.and.arrow.down.fill", "Importa", tint: "#30B0C7") { ui.showImport = true }
             row("link", "Integrazioni", tint: "#0A84FF") { ui.settingsPage = .linkApps }
             Spacer()

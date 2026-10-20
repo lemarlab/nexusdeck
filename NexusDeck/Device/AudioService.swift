@@ -89,7 +89,8 @@ final class AudioService: ObservableObject {
             for (i, ch) in MixerChannel.allCases.enumerated() where ch != .mic {
                 if mix.muted || (mix.channels[ch]?.muted ?? false) || !p.isRouted(ch, to: out) { m |= 1 << i }
             }
-            if bus == .creator ? !hearsMic : !micInStream { m |= 1 }
+            // NexusDeck voice changer on: the clean mic is replaced (it comes back filtered on the Chat channel).
+            if (bus == .creator ? !hearsMic : !micInStream) || store.dsp.appVoiceActive { m |= 1 }
             if bus == .audience && p.obsTracks { m = 0x3F & ~(1 << 1) }
             masks.append(m)
         }
@@ -254,28 +255,71 @@ final class AudioService: ObservableObject {
         c.send(AXProtocol.preampGain(MicGain.register(p.currentGainDB)))
     }
 
+    /// Reverb and echo only (fast: the toggles and sliders of these two effects send just this).
+    func applyReverb() {
+        guard let c = controller else { return }
+        let d = store.dsp
+        let anyReverb = d.reverbEnabled || d.echoEnabled
+        var master = AXProtocol.reverbMaster(anyReverb); master.preDelayMs = 0
+        var cmds = [master]
+        if anyReverb {
+            let r = d.reverbPresets[min(d.reverbPresetIndex, d.reverbPresets.count - 1)]
+            let mask: UInt8 = (d.reverbEnabled ? 1 : 0) | (d.echoEnabled ? 2 : 0)
+            var cmd = AXProtocol.reverb(r, echo: d.echo, enabled: mask); cmd.preDelayMs = 0
+            cmds.append(cmd)
+        }
+        c.sendInOrder(cmds)
+    }
+
+    /// Voice changer: gain of the filtered voice sent back to the mixer (heard in headphones / on stream).
+    var voiceReturnGain: Float {
+        guard store.dsp.appVoiceActive else { return 0 }
+        return hearsMic || micInStream ? 1 : 0
+    }
+
+    func toggleAppVoice(_ voice: Int? = nil) {
+        if let voice, voice != store.dsp.appVoice { store.dsp.appVoice = voice; store.dsp.appVoiceOn = true }
+        else { store.dsp.appVoiceOn.toggle() }
+        applyMic()
+    }
+
     func applyDSP() {
         guard let c = controller else { return }
         let d = store.dsp
-        c.send(AXProtocol.eqEnable(d.eqEnabled))
-        if d.eqEnabled { for (i, b) in d.currentEQ.enumerated() { c.send(AXProtocol.eqBand(index: i, b)) } }
-        c.send(AXProtocol.noiseGateEnable(d.noiseGateEnabled))
-        if d.noiseGateEnabled { c.send(AXProtocol.noiseGate(d.noiseGate)) }
-        c.send(AXProtocol.compressorEnable(d.compressorEnabled))
+        applyEQ()
+        applyGate()
+        applyCompressor()
+        applyReverb()
+        c.send(AXProtocol.voiceChanger(d.voiceChanger.rawValue))
+    }
+
+    // Single effects: the editor sends only the block that changed, right away.
+
+    func applyEQ() {
+        guard let c = controller else { return }
+        let d = store.dsp
+        var cmds = AXProtocol.eqEnable(d.eqEnabled)
+        if d.eqEnabled { cmds += d.currentEQ.enumerated().map { AXProtocol.eqBand(index: $0.offset, $0.element) } }
+        c.sendInOrder(cmds.map { var x = $0; x.preDelayMs = 0; return x })
+    }
+
+    func applyGate() {
+        guard let c = controller else { return }
+        let d = store.dsp
+        var cmds = [AXProtocol.noiseGateEnable(d.noiseGateEnabled)]
+        if d.noiseGateEnabled { cmds.append(AXProtocol.noiseGate(d.noiseGate)) }
+        c.sendInOrder(cmds.map { var x = $0; x.preDelayMs = 0; return x })
+    }
+
+    func applyCompressor() {
+        guard let c = controller else { return }
+        let d = store.dsp
+        var cmds = [AXProtocol.compressorEnable(d.compressorEnabled)]
         if d.compressorEnabled {
             let comp = d.compressorPresets[min(d.compressorPresetIndex, d.compressorPresets.count - 1)]
-            c.send(AXProtocol.compressor(d.compressorPresets[0], comp, makeup: d.makeupGain))
+            cmds.append(AXProtocol.compressor(d.compressorPresets[0], comp, makeup: d.makeupGain))
         }
-        let anyReverb = d.reverbEnabled || d.echoEnabled
-        c.send(AXProtocol.reverbMaster(anyReverb))
-        if anyReverb {
-            var r = d.reverbPresets[min(d.reverbPresetIndex, d.reverbPresets.count - 1)]
-            if !d.reverbEnabled { r.gain = -96; r.wetGain = -96 }
-            var e = d.echo
-            if !d.echoEnabled { e.gain = -96 }
-            c.send(AXProtocol.reverb(r, echo: e))
-        }
-        c.send(AXProtocol.voiceChanger(d.voiceChanger.rawValue))
+        c.sendInOrder(cmds.map { var x = $0; x.preDelayMs = 0; return x })
     }
 
     func applyDevice() {
@@ -307,133 +351,17 @@ final class AudioService: ObservableObject {
     var functionKeyColors: () -> [String?] = { [nil, nil, nil, nil] }
     /// Overrides the ambient strip (live / recording indicators).
     var auraOverride: LEDSetting?
-    private var ledTask: Task<Void, Never>?
+    var ledTask: Task<Void, Never>?
 
     enum LEDGroup: Hashable { case knobs, aura, buttons }
-    private var pendingLEDs: Set<LEDGroup> = []
-    private var lastSentLEDs: DeviceSettings?
+    var pendingLEDs: Set<LEDGroup> = []
+    var lastSentLEDs: DeviceSettings?
     /// Last state written to each knob ring (per-knob colors), to send only what changed.
-    private var lastRings: [String]?
+    var lastRings: [String]?
 
     /// Debounced: only groups whose settings changed are sent, once the user stops dragging.
     /// Start-up: no LED is lit until the volumes are set; then keys, rings and strip are restored in one go.
     var ringsKeepColors = false
-
-    /// Quit: every LED off (strip, function keys, rings).
-    func allLEDsOff() {
-        guard let c = controller else { return }
-        var cmds: [AXProtocol.Command] = [AXProtocol.auraStrip(sdkMode: 0, r: 0, g: 0, b: 0, speed: 0)]
-        for i in 0..<4 { cmds.append(AXProtocol.functionKeyLED(index: i, on: false, r: 0, g: 0, b: 0)) }
-        cmds.append(AXProtocol.knobRings(sdkMode: 0, r: 0, g: 0, b: 0, speed: 0))
-        for var cmd in cmds { cmd.preDelayMs = 120; c.sendAndWait(cmd, timeout: 0.6) }
-    }
-
-    /// Re-enables the level display of the knob rings (config1), the way the LED setup does.
-    func restoreRingLevelMode() async {
-        guard let c = controller else { return }
-        let k = AXProtocol.ledEffect(mode: store.library.device.ledKnob.mode.rawValue, peak: store.library.device.ledKnob.peak)
-        guard let reply = await c.transact(AXProtocol.readConfig1()), reply.count > 4 else { return }
-        var cfg = reply[4] & ~0x0E
-        if k.sdk == 0 { cfg = reply[4] & ~0x06 } else if k.sdk == 7 { cfg |= 0x0A } else { cfg |= 0x0C }
-        var cmd = AXProtocol.config1(cfg); cmd.preDelayMs = 0
-        c.sendInOrder([cmd])
-    }
-
-    func applyLEDs(force: Bool = false) {
-        guard controller != nil else { return }
-        let s = store.library.device
-        let last = force ? nil : lastSentLEDs
-        if force { lastRings = nil }
-        if last?.ledKnob != s.ledKnob { pendingLEDs.insert(.knobs) }
-        if last?.ledAura != s.ledAura || force { pendingLEDs.insert(.aura) }
-        if last?.ledButton != s.ledButton || force { pendingLEDs.insert(.buttons) }
-        lastSentLEDs = s
-        guard !pendingLEDs.isEmpty else { return }
-        ledTask?.cancel()
-        ledTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(300))
-            guard let self, !Task.isCancelled, let c = self.controller else { return }
-            // Start-up: everything waits for the final restore.
-            if self.ringsKeepColors { return }
-            let groups = self.pendingLEDs
-            self.pendingLEDs.removeAll()
-            let s = self.store.library.device
-
-            if groups.contains(.knobs) && self.ringsKeepColors {
-                await self.restoreRingLevelMode()
-            } else if groups.contains(.knobs) {
-                let k = AXProtocol.ledEffect(mode: s.ledKnob.mode.rawValue, peak: s.ledKnob.peak)
-                // Rewriting config1 resets the rings for a moment: only when the effect really changes.
-                var ringConfig: UInt8?
-                if let reply = await c.transact(AXProtocol.readConfig1()), reply.count > 4 {
-                    var cfg = reply[4] & ~0x0E
-                    if k.sdk == 0 { cfg = reply[4] & ~0x06 } else if k.sdk == 7 { cfg |= 0x0A } else { cfg |= 0x0C }
-                    if cfg != reply[4] { c.send(AXProtocol.config1(cfg)); self.lastRings = nil }
-                    ringConfig = cfg
-                }
-                // Rings and the level mode go out in one burst, without the LED pre-delay: a ring write leaves the
-                // ring fully lit until config1 is set again, so the gap between them must be as short as possible.
-                var burst: [AXProtocol.Command] = []
-                // The mixer needs a short pause between LED writes (with none, only the last ring is taken).
-                func add(_ cmd: AXProtocol.Command) {
-                    var c = cmd; c.preDelayMs = 250; burst.append(c)
-                    // Each ring is switched back to the level display right after its write, so it never shows
-                    // fully lit: the rings come up one after the other, left to right.
-                    if k.sdk != 0, let cfg = ringConfig {
-                        var lv = AXProtocol.config1(cfg); lv.preDelayMs = 120; burst.append(lv)
-                    }
-                }
-                let speed = k.speed ? UInt8(s.ledKnob.speed) : 0
-                if s.ledKnob.colorSource == .perItem && s.ledKnob.mode.usesColor {
-                    var sent = self.lastRings ?? [String](repeating: "", count: 6)
-                    for i in 0..<6 {
-                        let kc = Self.rgb(s.ledKnob.itemColors[i], brightness: s.ledKnob.brightness)
-                        let sig = "\(k.sdk)-\(speed)-\(kc.0)-\(kc.1)-\(kc.2)"
-                        // Only the rings that changed are rewritten.
-                        if sent[i] == sig { continue }
-                        add(AXProtocol.knobRing(i, sdkMode: k.sdk, r: kc.0, g: kc.1, b: kc.2, speed: speed))
-                        sent[i] = sig
-                    }
-                    self.lastRings = sent
-                } else {
-                    let kc = k.white ? (UInt8(255), UInt8(255), UInt8(255)) : Self.rgb(s.ledKnob.colorHex, brightness: s.ledKnob.brightness)
-                    add(AXProtocol.knobRings(sdkMode: k.sdk, r: kc.0, g: kc.1, b: kc.2, speed: speed))
-                    self.lastRings = nil
-                }
-                if !burst.isEmpty { c.sendInOrder(burst) }
-            }
-            if groups.contains(.aura) { self.sendAura(self.auraOverride ?? s.ledAura) }
-            if groups.contains(.buttons) { await self.sendFunctionKeyLEDs() }
-        }
-    }
-
-    /// Function key LEDs: off, the key's own background color, or one custom color.
-    func sendFunctionKeyLEDs() async {
-        guard let c = controller, !ringsKeepColors else { return }
-        let s = store.library.device
-        let colors = functionKeyColors()
-        for i in 0..<4 {
-            let source = s.ledButton.colorSource
-            let on = s.ledButton.mode != .off && (source != .widget || colors[i] != nil)
-            let hex: String
-            switch source {
-            case .widget: hex = colors[i] ?? "#000000"
-            case .perItem: hex = s.ledButton.itemColors[i]
-            case .single: hex = s.ledButton.colorHex
-            }
-            let col = Self.rgb(hex, brightness: s.ledButton.brightness)
-            c.send(AXProtocol.functionKeyLED(index: i, on: on, r: col.0, g: col.1, b: col.2))
-        }
-    }
-
-    func sendAura(_ led: LEDSetting) {
-        guard let c = controller else { return }
-        let e = AXProtocol.ledEffect(mode: led.mode.rawValue, peak: led.peak)
-        let col = led.mode == .off ? (UInt8(0), UInt8(0), UInt8(0)) : (e.white ? (UInt8(255), UInt8(255), UInt8(255)) : Self.rgb(led.colorHex, brightness: led.brightness))
-        let cmd = AXProtocol.auraStrip(sdkMode: e.sdk, r: col.0, g: col.1, b: col.2, speed: e.speed ? UInt8(led.speed) : 0)
-        c.send(cmd)
-        c.send(cmd)
-    }
 
     // MARK: Edits from UI / actions
 
@@ -532,52 +460,7 @@ final class AudioService: ObservableObject {
         if ch == .mic { applyMic() }
     }
 
-    /// Mute masks read from the mixer (registers 0x11/0x12, bit = channel Mic…Chat), after a knob press.
-    /// The firmware toggles the Mic knob's mute in the Audience mix only: in Single Mix a change in either
-    /// mix is applied to both, so the two mixes stay identical.
-    func mirrorMutes(_ masks: [UInt8]) {
-        guard masks.count >= 2 else { return }
-        var changed = false
-        var micChanged = false
-        if store.mixer.dualMix {
-            for b in MixBus.allCases {
-                for (i, ch) in MixerChannel.allCases.enumerated() {
-                    let muted = masks[b.rawValue] & (1 << i) != 0
-                    if store.mixer.mixes[b]?.channels[ch]?.muted != muted {
-                        store.mixer.mixes[b, default: MixState()].channels[ch, default: ChannelState()].muted = muted
-                        if ch == .mic { micChanged = true }
-                    }
-                }
-            }
-        } else {
-            for (i, ch) in MixerChannel.allCases.enumerated() {
-                let current = store.mixer.mixes[.creator]?.channels[ch]?.muted ?? false
-                let m0 = masks[0] & (1 << i) != 0, m1 = masks[1] & (1 << i) != 0
-                guard m0 != current || m1 != current else { continue }
-                // One of the mixes was toggled on the device: that is the new state for both.
-                let muted = !current
-                for b in MixBus.allCases { store.mixer.mixes[b, default: MixState()].channels[ch, default: ChannelState()].muted = muted }
-                changed = true
-                if ch == .mic { micChanged = true }
-            }
-            // Re-align the two mixes on the device.
-            if changed || masks[0] != masks[1] { controller?.send(AXProtocol.mixerMutes(muteMasks())) }
-        }
-        if micChanged { applyMic() }
-    }
 
-    /// Mute state reported by the hardware for a knob-driven channel.
-    func mirrorKnobMute(_ index: Int, _ muted: Bool) {
-        guard index < MixerChannel.allCases.count else { return }
-        let ch = MixerChannel.allCases[index]
-        let buses: [MixBus] = [store.mixer.dualMix ? store.mixer.activeMix : .creator]
-        var changed = false
-        for b in buses where store.mixer.mixes[b]?.channels[ch]?.muted != muted {
-            store.mixer.mixes[b, default: MixState()].channels[ch, default: ChannelState()].muted = muted
-            changed = true
-        }
-        if changed && ch == .mic { applyMic() }
-    }
 
     /// 12 meter samples: assumed 6 per mix in channel order.
     /// Raw sample → 0…100, as AxCorePrivate::levelScaleAndEmit: dB = 20·log10(√2·s/32767), clamped to −60…0.
@@ -597,10 +480,18 @@ final class AudioService: ObservableObject {
     /// - Mic: real input level (after the mic gain, before the fader), so even a quiet voice shows.
     /// - Other channels: level after the channel fader, as the reference app, ignoring noise below −48 dB.
     /// A muted channel shows nothing.
+    private var lastMeterPublish = Date.distantPast
+
     func updateMeters(_ raw: [Int]) {
         guard raw.count >= 12 else { return }
         micInputDB = 20 * log10(max(1e-9, sqrt(2) * Double(max(raw[0], raw[1])) / 32767))
         duckingTick()
+        // The UI meters refresh about 15 times a second (every publish redraws the views that show them).
+        let now = Date()
+        guard now.timeIntervalSince(lastMeterPublish) >= 1.0 / 15 else { return }
+        lastMeterPublish = now
+        var newMeters = meters
+        var newOut = outputMeters
         for bus in MixBus.allCases {
             let mix = store.mixer.mixes[store.mixer.dualMix ? bus : .creator] ?? MixState()
             var m: [MixerChannel: Int] = [:]
@@ -620,9 +511,12 @@ final class AudioService: ObservableObject {
                 let db = 20 * log10(max(1e-9, sqrt(2) * Double(sample) / 32767))
                 m[ch] = db < Self.meterFloorDB ? 0 : Self.meterPercent(sample)
             }
-            meters[bus] = m
-            outputMeters[bus] = m.values.max() ?? 0
+            newMeters[bus] = m
+            newOut[bus] = m.values.max() ?? 0
         }
+        // One publish for both mixes (and none when nothing moved).
+        if newMeters != meters { meters = newMeters }
+        if newOut != outputMeters { outputMeters = newOut }
     }
 
     /// Startup check: reads the volumes back from the mixer and, if they differ from the profile (the device
@@ -656,17 +550,7 @@ final class AudioService: ObservableObject {
         return true
     }
 
-    func readBackFromDevice() async {
-        guard let c = controller, let state = await c.readMixer() else { return }
-        for bus in MixBus.allCases {
-            for (i, ch) in MixerChannel.allCases.enumerated() {
-                store.mixer.mixes[bus, default: MixState()].channels[ch, default: ChannelState()].level = Self.ui(state.volumes[bus.rawValue][i])
-                store.mixer.mixes[bus, default: MixState()].channels[ch, default: ChannelState()].muted = state.mutes[bus.rawValue] & (1 << i) != 0
-            }
-        }
-    }
 
-    func saveToDevice() { controller?.send(AXProtocol.saveToFlash()) }
 }
 
 /// Live input levels (0…100) shared with views rendered outside the environment (panel frames).

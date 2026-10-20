@@ -41,7 +41,6 @@ extension View {
             .environmentObject(app.engine.spotify)
             .environmentObject(app.engine.streamlabs)
             .environmentObject(app.engine.discord)
-            .environmentObject(app.engine.voicemod)
             .environmentObject(app.bridge)
             .environmentObject(app.appRouter)
     }
@@ -64,6 +63,27 @@ final class AppState: ObservableObject {
     private var softGainSync: AnyCancellable?
     private var mixSync: AnyCancellable?
     private var loadingSync: AnyCancellable?
+    private var linkSync: AnyCancellable?
+    private var mixerVisibility: AnyCancellable?
+    private var retryObserver: Any?
+    private var notFoundWork: DispatchWorkItem?
+
+    /// After 5 s without a ready mixer the overlay turns into the "not found" message.
+    private func scheduleNotFound() {
+        notFoundWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in
+            guard let self, !self.deck.deviceReady, !self.ui.closing else { return }
+            if !self.deviceManager.state.isConnected && !self.ui.dismissedNotFound {
+                self.ui.link = .notFound
+                self.ui.loading = true
+            } else if self.deviceManager.state.isConnected {
+                // Connected but still starting: wait a bit longer.
+                self.scheduleNotFound()
+            }
+        }
+        notFoundWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: w)
+    }
     private var started = false
 
     init() {
@@ -91,12 +111,27 @@ final class AppState: ObservableObject {
         bridge.setSingleMix(!store.mixer.dualMix && !store.mixer.obsTracks)
         bridge.start(sampleRate: Double(store.library.device.sampleRate))
         appRouter.start()
-        // The window stays blurred until the mixer is set up (or a few seconds without a mixer).
-        loadingSync = deck.$deviceReady.filter { $0 }.first().sink { [ui] _ in ui.loading = false }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [self] in
-            if !deviceManager.state.isConnected { ui.loading = false }
+        // Mixer link overlay: blurred window while connecting / reconnecting, error after 5 s without a mixer.
+        loadingSync = deck.$deviceReady.removeDuplicates().sink { [self] ready in
+            if ready { ui.loading = false; ui.dismissedNotFound = false }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [ui] in ui.loading = false }
+        linkSync = deviceManager.$state.map(\.isConnected).removeDuplicates().dropFirst().sink { [self] connected in
+            guard !ui.closing else { return }
+            if connected {
+                ui.link = .connecting
+                ui.loading = true
+            } else {
+                deck.deviceReady = false
+                ui.link = .reconnecting
+                ui.loading = true
+                ui.dismissedNotFound = false
+                scheduleNotFound()
+            }
+        }
+        scheduleNotFound()
+        retryObserver = NotificationCenter.default.addObserver(forName: .nexusRetryMixer, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleNotFound() }
+        }
         // Windows restored from the previous layout can be smaller than the new minimum size.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             for w in NSApp.windows where w.styleMask.contains(.titled) && w.frame.width < 1320 {
@@ -112,7 +147,8 @@ final class AppState: ObservableObject {
         Updater.shared.startAutomaticChecks()
         appRouter.setVisibility(dualMix: store.mixer.dualMix, obsTracks: store.mixer.obsTracks)
         appRouter.setNames(store.mixer)
-        appRouter.restoreDefaultOutput()
+        // NexusDeck devices only with the mixer connected (they are hidden at start until it is there).
+        mixerVisibility = deviceManager.$state.map(\.isConnected).removeDuplicates().sink { [appRouter] c in appRouter.mixerConnected = c }
         mixSync = store.objectWillChange.debounce(for: .milliseconds(200), scheduler: RunLoop.main).sink { [self] _ in
             bridge.setSingleMix(!store.mixer.dualMix && !store.mixer.obsTracks)
             appRouter.setVisibility(dualMix: store.mixer.dualMix, obsTracks: store.mixer.obsTracks)
@@ -129,6 +165,7 @@ final class AppState: ObservableObject {
                 return v * v
             }
             bridge.setSoftGains(lineIn: gain(.lineIn), console: gain(.console))
+            bridge.setVoice(store.dsp.appVoiceActive ? store.dsp.appVoice : 0, returnGain: audio.voiceReturnGain)
             bridge.setGain(.capSystem, audio.captureGain(.system))
             bridge.setGain(.capGame, audio.captureGain(.game))
             bridge.setGain(.capChat, audio.captureGain(.chat))

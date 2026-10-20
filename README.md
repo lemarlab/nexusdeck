@@ -16,7 +16,7 @@ A native macOS app (Swift/SwiftUI) to control the **AX310** mixer / stream deck,
 - Audio mixer: Single/Dual Mix, vertical channel strips, volumes, mutes, mic monitoring, level meters
 - Microphone: gain, 48V phantom power, noise gate, compressor, equalizer, echo, reverb
 - Lighting for keys, knobs and LED strip
-- Integrations: OBS, Streamlabs Desktop, Twitch, YouTube, Spotify, Discord, Voicemod
+- Integrations: OBS, Streamlabs Desktop, Twitch, YouTube, Spotify, Discord
 - Import of profiles from an existing installation of the manufacturer's software
 
 ## New in NexusDeck (not available in the original software)
@@ -28,6 +28,7 @@ A native macOS app (Swift/SwiftUI) to control the **AX310** mixer / stream deck,
 - **Censor bleep**: hold a key to mute the mic and play a bleep (1 kHz tone or your own sound).
 - **Auto ducking**: music and game are lowered automatically while you speak, with smooth fade out / fade in (adjustable threshold, reduction, release, fade times and channels).
 - **Voice effect presets**: one key toggles a combination of reverb, echo and the hardware voice changer.
+- **Built-in voice changer**: robot, chipmunk, giant, radio, demon, alien, phone and cave voices, applied to Chat Mic, the stream and your headphones, switched from a key.
 - **Separate tracks for OBS**: every channel (System, Game, Chat, Line In, Console) is also available as an input device, so in OBS each source can go to its own audio track (e.g. music live but not in the VOD). The physical Line In can be captured on its own too.
 - **Only the devices you use**: Creator/Audience Mix and the OBS inputs appear on the Mac only when Dual Mix / OBS tracks are on. Devices are labelled `[AM-OUT]` (outputs) and `[AM-IN]` (inputs).
 - **Custom channel names and icons**: rename a channel (e.g. "Music" instead of System) and pick its icon; the Mac devices are renamed too.
@@ -35,7 +36,7 @@ A native macOS app (Swift/SwiftUI) to control the **AX310** mixer / stream deck,
 - **macOS-style design**: native sidebar, light and dark appearance, translucent materials, and a combined Keys / Mixer stage with smooth animations.
 - **Polished device experience**: start-up and shutdown animations on the panel, LEDs that stay off until the mixer is set up and turn off when NexusDeck quits, smooth page slides, fixed function keys.
 - **Noise gate calibration**: one click measures your room noise and sets the threshold.
-- **Native Discord and Voicemod integrations**: built in and switched on/off, no plug-ins to download.
+- **Native Discord integration**: built in, no plug-ins to download.
 - **Native Apple Silicon app**, no Intel/Rosetta components.
 
 ## Installation
