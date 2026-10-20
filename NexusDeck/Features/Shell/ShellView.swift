@@ -58,14 +58,12 @@ enum MainSection: String, CaseIterable {
 }
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, audioOutput, obs, streamlabs, backup, guide, feedback
+    case general, audioOutput, backup, guide, feedback
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .general: "gearshape.fill"
         case .audioOutput: "speaker.wave.2.fill"
-        case .obs: "record.circle"
-        case .streamlabs: "dot.radiowaves.left.and.right"
         case .backup: "externaldrive.fill"
         case .guide: "book.fill"
         case .feedback: "bubble.left.fill"
@@ -75,8 +73,6 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .general: Color(hex: "#8E8E93")
         case .audioOutput: Color(hex: "#FF2D55")
-        case .obs: Color(hex: "#48484A")
-        case .streamlabs: Color(hex: "#1E8C7E")
         case .backup: Color(hex: "#30B0C7")
         case .guide: Color(hex: "#FF7A00")
         case .feedback: Color(hex: "#34C759")
@@ -86,8 +82,6 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .general: "Generale"
         case .audioOutput: "Uscita audio"
-        case .obs: "OBS"
-        case .streamlabs: "Streamlabs Desktop"
         case .backup: "Backup e ripristino"
         case .guide: "Guida alle impostazioni"
         case .feedback: "Feedback"
@@ -205,7 +199,7 @@ struct ShellView: View {
         case .ducking: PageScroll { DuckingPage() }
         case .obs: PageScroll { OBSTracksPage() }
         case .lighting: LightingPage()
-        case .integrations: PageScroll { LinkAppsPage() }
+        case .integrations: PageScroll { IntegrationsPage() }
         }
     }
 }
@@ -276,7 +270,7 @@ struct PageScroll<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
         ScrollView {
-            content.padding(28).frame(maxWidth: 820, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
+            content.padding(28).frame(maxWidth: 980, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

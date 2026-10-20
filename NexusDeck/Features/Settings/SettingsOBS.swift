@@ -10,7 +10,7 @@ struct OBSPage: View {
     @State private var reveal = false
 
     var body: some View {
-        SectionCard(title: "Impostazioni server WebSocket di OBS") {
+        VStack(alignment: .leading) {
             VStack(alignment: .leading, spacing: 6) {
                 label("Indirizzo IP")
                 HStack(spacing: 14) {
@@ -34,7 +34,7 @@ struct OBSPage: View {
                     InfoIcon(text: "Lascia vuoto se in OBS l'autenticazione è disattivata.")
                 }
                 HStack(spacing: 14) {
-                    FlatButton(title: "Applica", width: 134) {
+                    FlatButton(title: "Applica", prominent: true, width: 134) {
                         Keychain.set(password, for: "obs")
                         obs.configure(host: store.library.integrations.obsHost, port: store.library.integrations.obsPort, password: password)
                         obs.connect()
@@ -52,10 +52,10 @@ struct OBSPage: View {
                         Text(".")
                     }
                 }
-                .font(.system(size: 13)).foregroundStyle(Theme.textMid).padding(.top, 60).padding(.bottom, 30)
+                .font(.system(size: 12)).foregroundStyle(Theme.textDim).padding(.top, 16)
             }
         }
-        .frame(width: 526)
+        .padding(.horizontal, 24).padding(.vertical, 8)
     }
 
     private func label(_ t: LocalizedStringKey) -> some View { Text(t).font(.system(size: 13.5)).foregroundStyle(Theme.textMid) }
@@ -76,7 +76,7 @@ struct StreamlabsPage: View {
     @State private var token = Keychain.get("streamlabs") ?? ""
 
     var body: some View {
-        SectionCard(title: "Token API di Streamlabs Desktop") {
+        VStack(alignment: .leading) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Token API di Streamlabs Desktop").font(.system(size: 13.5)).foregroundStyle(Theme.textMid)
                 HStack(spacing: 14) {
@@ -86,7 +86,7 @@ struct StreamlabsPage: View {
                 Text("Porta").font(.system(size: 13.5)).foregroundStyle(Theme.textMid).padding(.top, 8)
                 TextField("", value: $store.library.integrations.streamlabsPort, format: .number.grouping(.never)).darkField(height: 26).frame(width: 384)
                 HStack(spacing: 14) {
-                    FlatButton(title: "Applica", width: 134) {
+                    FlatButton(title: "Applica", prominent: true, width: 134) {
                         Keychain.set(token, for: "streamlabs")
                         store.library.integrations.streamlabsEnabled = true
                         streamlabs.connect(port: store.library.integrations.streamlabsPort, token: token)
@@ -97,5 +97,6 @@ struct StreamlabsPage: View {
                 .padding(.top, 10)
             }
         }
+        .padding(.horizontal, 24).padding(.vertical, 8)
     }
 }

@@ -5,34 +5,33 @@ import ServiceManagement
 
 enum LightingArea: String { case screen, keys, knobs, strip }
 
+/// Settings of one lighting zone (right column of the Lighting page).
 struct CustomLightingPage: View {
     @EnvironmentObject var store: ProfileStore
     @EnvironmentObject var audio: AudioService
     @EnvironmentObject var deck: DeckController
-    @State private var area: LightingArea = .screen
+    @Binding var area: LightingArea
 
     private func dev<T>(_ kp: WritableKeyPath<DeviceSettings, T>, _ apply: @escaping () -> Void = {}) -> Binding<T> {
         Binding(get: { store.library.device[keyPath: kp] }, set: { store.library.device[keyPath: kp] = $0; apply() })
     }
 
     var body: some View {
-        LightingDeviceDrawing(area: $area, stripHex: store.library.device.ledAura.colorHex, knobHex: store.library.device.ledKnob.colorSource == .perItem ? store.library.device.ledKnob.itemColors[0] : store.library.device.ledKnob.colorHex)
-            .frame(maxWidth: .infinity).padding(.bottom, 10)
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(title).font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.textMid)
+                Text(title).font(.system(size: 17, weight: .bold))
                 Spacer()
-                Button { reset() } label: { Image(systemName: "arrow.counterclockwise") }.buttonStyle(.plain).foregroundStyle(Theme.textDim)
+                Button { reset() } label: { Label("Ripristina", systemImage: "arrow.counterclockwise").font(.system(size: 12)) }
+                    .buttonStyle(.plain).foregroundStyle(Theme.accent)
             }
+            .padding(.horizontal, 24).padding(.bottom, 4)
             switch area {
-            case .screen: screenSettings
-            case .keys: LEDControls(led: dev(\.ledButton, { audio.applyLEDs() }), zone: .keys)
-            case .knobs: LEDControls(led: dev(\.ledKnob, { audio.applyLEDs() }), zone: .knobs)
-            case .strip: LEDControls(led: dev(\.ledAura, { audio.applyLEDs() }), zone: .strip)
+            case .screen: SectionCard(title: "Schermo") { screenSettings }
+            case .keys: LEDZoneEditor(led: dev(\.ledButton, { audio.applyLEDs() }), zone: .keys)
+            case .knobs: LEDZoneEditor(led: dev(\.ledKnob, { audio.applyLEDs() }), zone: .knobs)
+            case .strip: LEDZoneEditor(led: dev(\.ledAura, { audio.applyLEDs() }), zone: .strip)
             }
         }
-        .padding(.horizontal, 40).padding(.vertical, 18)
-        .background(Theme.card)
     }
 
     private var title: LocalizedStringKey {
@@ -137,9 +136,10 @@ struct LEDControls: View {
 
     @Binding var led: LEDSetting
     let zone: Zone
+    var showsEffect = true
     @State private var editing = 0
 
-    private var modes: [LEDSetting.Mode] {
+    var modes: [LEDSetting.Mode] {
         switch zone {
         case .keys: [.off, .staticColor]
         case .knobs: [.off, .staticColor, .flash, .rainbow, .volume]
@@ -166,8 +166,10 @@ struct LEDControls: View {
     }
 
     var body: some View {
-        SettingRow(title: "Effetto", labelWidth: 150) {
-            DarkPicker(selection: $led.mode, options: modes.map { ($0, title($0)) }, height: 26).frame(width: 312)
+        if showsEffect {
+            SettingRow(title: "Effetto", labelWidth: 150) {
+                DarkPicker(selection: $led.mode, options: modes.map { ($0, title($0)) }, height: 26).frame(width: 312)
+            }
         }
         if led.mode != .off {
             SettingRow(title: "Luminosità", labelWidth: 150) {
@@ -234,7 +236,7 @@ struct LEDControls: View {
         }
     }
 
-    private func title(_ m: LEDSetting.Mode) -> String {
+    func title(_ m: LEDSetting.Mode) -> String {
         switch m {
         case .off: "Spento"
         case .staticColor: zone == .keys ? "Acceso" : "Statico"
@@ -315,6 +317,51 @@ struct LightingDeviceDrawing: View {
                 p.move(to: CGPoint(x: w - l, y: h)); p.addLine(to: CGPoint(x: w, y: h)); p.addLine(to: CGPoint(x: w, y: h - l))
             }
             .stroke(c, lineWidth: 3)
+        }
+    }
+}
+
+/// One LED zone: effect tiles (with a colour preview) and the colour / brightness settings.
+struct LEDZoneEditor: View {
+    @Binding var led: LEDSetting
+    let zone: LEDControls.Zone
+
+    var body: some View {
+        let controls = LEDControls(led: $led, zone: zone, showsEffect: false)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Effetto").font(.system(size: 13, weight: .semibold)).padding(.leading, 28)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                ForEach(controls.modes, id: \.self) { m in
+                    let on = led.mode == m
+                    Button { led.mode = m } label: {
+                        VStack(spacing: 7) {
+                            RoundedRectangle(cornerRadius: 4).fill(Self.preview(m, led)).frame(width: 40, height: 10)
+                            Text(controls.title(m)).font(.system(size: 11.5)).lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity).frame(height: 54)
+                        .background(on ? Theme.accent.opacity(0.1) : Theme.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(on ? Theme.accent : Theme.cardBorder, lineWidth: on ? 2 : 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 24)
+            if led.mode != .off {
+                SectionCard(title: "Colore e luminosità") { controls }
+            }
+        }
+    }
+
+    static func preview(_ m: LEDSetting.Mode, _ led: LEDSetting) -> AnyShapeStyle {
+        let c = Color(hex: led.colorHex)
+        switch m {
+        case .off: return AnyShapeStyle(Color.gray.opacity(0.3))
+        case .wave, .colorCycle, .spectrum:
+            return AnyShapeStyle(LinearGradient(colors: [.red, .orange, .yellow, .green, .blue, .purple], startPoint: .leading, endPoint: .trailing))
+        case .rainbow, .flash: return AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.15)], startPoint: .leading, endPoint: .trailing))
+        case .volume: return AnyShapeStyle(LinearGradient(stops: [.init(color: c, location: 0), .init(color: c, location: 0.6), .init(color: Color.gray.opacity(0.3), location: 0.6)], startPoint: .leading, endPoint: .trailing))
+        default: return AnyShapeStyle(c)
         }
     }
 }

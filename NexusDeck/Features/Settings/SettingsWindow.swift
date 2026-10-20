@@ -64,8 +64,6 @@ struct SettingsWindow: View {
         switch ui.settingsPage ?? .general {
         case .general: GeneralPage()
         case .audioOutput: OutputPage()
-        case .obs: OBSPage()
-        case .streamlabs: StreamlabsPage()
         case .backup: BackupPage()
         case .guide: GuidePage()
         case .feedback: FeedbackPage()

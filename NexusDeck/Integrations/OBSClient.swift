@@ -36,6 +36,7 @@ final class OBSClient: ObservableObject {
     private var task: URLSessionWebSocketTask?
     private var pending: [String: CheckedContinuation<[String: Any], Error>] = [:]
     private var host = "127.0.0.1"
+    var hostDescription: String { "\(host == "127.0.0.1" ? "questo Mac" : host):\(port)" }
     private var port = 4455
     private var password = ""
     private var reconnect = true

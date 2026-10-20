@@ -3,59 +3,12 @@ import ServiceManagement
 
 // MARK: Link applications
 
-struct LinkAppsPage: View {
-    @EnvironmentObject var store: ProfileStore
-    @EnvironmentObject var twitch: TwitchClient
-    @EnvironmentObject var youtube: YouTubeClient
-    @EnvironmentObject var spotify: SpotifyClient
-    @State private var configuring: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Gestione account social").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.textMid)
-                Spacer()
-                InfoIcon(text: "Collega i tuoi account per usare i widget di YouTube, Twitch e Spotify. Ogni servizio richiede un Client ID registrato da te.")
-            }
-            HStack(spacing: 50) {
-                account("YouTube", Color(hex: "#FF0000"), "play.rectangle.fill", youtube.isLoggedIn, youtube.channelTitle) { configuring = "youtube" }
-                account("Twitch", Color(hex: "#9146FF"), "bubble.left.fill", twitch.isLoggedIn, twitch.userName) { configuring = "twitch" }
-                account("Spotify", Color(hex: "#1ED760"), "music.note", spotify.isLoggedIn, "Spotify") { configuring = "spotify" }
-            }
-            .padding(.top, 26).padding(.leading, 50)
-            BuiltInIntegrationsSettings()
-                .padding(.top, 30).padding(.leading, 50).padding(.trailing, 30)
-            Spacer()
-            if !(youtube.isLoggedIn || twitch.isLoggedIn || spotify.isLoggedIn) {
-                Text("Clicca Aggiungi account per accedere o aggiungere un nuovo account.")
-                    .font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.textMid).frame(maxWidth: .infinity)
-            }
-            Spacer()
-        }
-        .padding(20)
-        .frame(height: 612)
-        .background(Theme.card)
-        .sheet(item: Binding(get: { configuring.map { IdentifiedString(value: $0) } }, set: { configuring = $0?.value })) { s in
-            AccountSheet(service: s.value)
-        }
-    }
-
-    private func account(_ name: String, _ color: Color, _ symbol: String, _ on: Bool, _ who: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: symbol).font(.system(size: 13)).foregroundStyle(.white)
-                    .frame(width: 32, height: 22).background(color).clipShape(RoundedRectangle(cornerRadius: 5))
-                Text(on ? who : "Aggiungi account").font(.system(size: 14)).foregroundStyle(Theme.textMid)
-            }
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 struct IdentifiedString: Identifiable { let value: String; var id: String { value } }
 
 struct AccountSheet: View {
     let service: String
+    /// Shown inside the Integrations page (no title, no Done button).
+    var embedded = false
     @EnvironmentObject var store: ProfileStore
     @EnvironmentObject var twitch: TwitchClient
     @EnvironmentObject var youtube: YouTubeClient
@@ -64,7 +17,7 @@ struct AccountSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(service.capitalized).font(.system(size: 15, weight: .bold))
+            if !embedded { Text(service.capitalized).font(.system(size: 15, weight: .bold)) }
             switch service {
             case "twitch":
                 field("Client ID (dev.twitch.tv)", $store.library.integrations.twitchClientID)
@@ -85,10 +38,11 @@ struct AccountSheet: View {
                 status(spotify.isLoggedIn, "Collegato", nil, spotify.lastError)
                 buttons(spotify.isLoggedIn, login: { spotify.clientID = store.library.integrations.spotifyClientID; Task { await spotify.login() } }, logout: spotify.logout)
             }
-            HStack { Spacer(); FlatButton(title: "Fine", prominent: true, width: 90) { dismiss() } }
+            if !embedded { HStack { Spacer(); FlatButton(title: "Fine", prominent: true, width: 90) { dismiss() } } }
         }
-        .padding(20).frame(width: 460)
-        .background(Theme.panel)
+        .padding(embedded ? 0 : 20).frame(maxWidth: embedded ? 520 : 460, alignment: .leading)
+        .padding(.vertical, embedded ? 8 : 0)
+        .background(embedded ? Color.clear : Theme.panel)
     }
 
     private func field(_ t: String, _ b: Binding<String>) -> some View {
