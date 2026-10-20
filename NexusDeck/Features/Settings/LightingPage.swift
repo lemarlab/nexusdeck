@@ -109,25 +109,21 @@ struct LightingPreview: View {
     @Binding var area: LightingArea
     @EnvironmentObject var store: ProfileStore
     @EnvironmentObject var audio: AudioService
+    @EnvironmentObject var deck: DeckController
+    @EnvironmentObject var engine: ActionEngine
+    @State private var thumb: CGImage?
 
     var body: some View {
         let d = store.library.device
         VStack(spacing: 14) {
             HStack(spacing: 12) {
-                // Touch screen
-                RoundedRectangle(cornerRadius: 10).fill(Color(hex: "#0C0C0D"))
-                    .overlay(
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 5), spacing: 4) {
-                            ForEach(0..<20, id: \.self) { i in
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(LinearGradient(colors: [Color(hex: "#FFA24D"), Color(hex: "#FF7A00")], startPoint: .top, endPoint: .bottom))
-                                    .opacity(i % 3 == 2 ? 0.25 : 0.85 * Double(d.brightness) / 100 + 0.15)
-                                    .frame(height: 26)
-                            }
-                        }
-                        .padding(7)
-                    )
-                    .frame(width: 250, height: 148)
+                // Touch screen: static thumbnail of the first page
+                Group {
+                    if let thumb { Image(decorative: thumb, scale: 1).resizable() } else { Color(hex: "#0C0C0D") }
+                }
+                .frame(width: 250, height: 150)
+                .brightness(-0.5 * (1 - Double(d.brightness) / 100))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
                     .modifier(ZoneOutline(on: area == .screen))
                     .onTapGesture { area = .screen }
                 // Function keys
@@ -168,6 +164,11 @@ struct LightingPreview: View {
                 .onTapGesture { area = .strip }
         }
         .padding(18)
+        .onAppear {
+            let r = ImageRenderer(content: PanelCanvas(deck: deck, store: store, images: engine.widgetImages, page: 0, forceOn: true))
+            r.scale = 1
+            thumb = r.cgImage
+        }
         .background(
             RoundedRectangle(cornerRadius: 24)
                 .fill(LinearGradient(colors: [Color(hex: "#2E2E31"), Color(hex: "#18181A")], startPoint: .top, endPoint: .bottom))
