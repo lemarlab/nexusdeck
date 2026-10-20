@@ -118,6 +118,9 @@ struct Ducking: Codable, Hashable {
     var reductionDB: Double = 12
     /// Time the volume stays down after you stop speaking.
     var releaseMs: Double = 800
+    /// Fade times: lowering (fade out) and coming back (fade in).
+    var fadeOutMs: Double = 250
+    var fadeInMs: Double = 800
     var channels: [String] = [MixerChannel.system.rawValue, MixerChannel.game.rawValue]
     /// Only in the stream (Audience) or also in the headphones.
     var streamOnly = false

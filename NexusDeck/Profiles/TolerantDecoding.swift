@@ -124,6 +124,8 @@ extension Ducking {
         thresholdDB = c.v("thresholdDB", -38)
         reductionDB = c.v("reductionDB", 12)
         releaseMs = c.v("releaseMs", 800)
+        fadeOutMs = c.v("fadeOutMs", 250)
+        fadeInMs = c.v("fadeInMs", 800)
         channels = c.v("channels", channels)
         streamOnly = c.v("streamOnly", false)
     }

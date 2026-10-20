@@ -144,6 +144,12 @@ private struct DuckingPage: View {
             row("Rilascio", "\(Int(d.releaseMs)) ms") {
                 ThinSlider(value: Binding(get: { d.releaseMs }, set: { v in store.mixer.ducking.releaseMs = (v / 50).rounded() * 50 }), range: 100...3000)
             }
+            row("Dissolvenza in uscita", "\(Int(d.fadeOutMs)) ms") {
+                ThinSlider(value: Binding(get: { d.fadeOutMs }, set: { v in store.mixer.ducking.fadeOutMs = (v / 50).rounded() * 50 }), range: 0...2000)
+            }
+            row("Dissolvenza in entrata", "\(Int(d.fadeInMs)) ms") {
+                ThinSlider(value: Binding(get: { d.fadeInMs }, set: { v in store.mixer.ducking.fadeInMs = (v / 50).rounded() * 50 }), range: 0...4000)
+            }
             Text("Sorgenti da abbassare").font(.system(size: 12.5, weight: .bold))
             HStack(spacing: 18) {
                 ForEach(MixerChannel.allCases.filter { $0 != .mic }) { ch in
@@ -168,8 +174,8 @@ private struct DuckingPage: View {
 
     private func row<C: View>(_ t: LocalizedStringKey, _ v: String, @ViewBuilder _ c: () -> C) -> some View {
         HStack(spacing: 14) {
-            Text(t).font(.system(size: 12)).foregroundStyle(Theme.textMid).frame(width: 110, alignment: .leading)
-            c().frame(width: 360)
+            Text(t).font(.system(size: 12)).foregroundStyle(Theme.textMid).frame(width: 150, alignment: .leading)
+            c().frame(width: 320)
             Text(v).font(.system(size: 12, weight: .bold)).frame(width: 70, alignment: .trailing)
         }
     }

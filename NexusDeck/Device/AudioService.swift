@@ -47,7 +47,7 @@ final class AudioService: ObservableObject {
         c.send(AXProtocol.knobControl(mixer: p.dualMix && !p.obsTracks ? p.activeMix.rawValue : 0, linked: !p.dualMix && !p.obsTracks))
         // The monitor overrides the mic volume in some mixes: re-apply it after the volumes.
         applyMic()
-        if ducked { applyDucking() }
+        if ducked || duckAmount > 0 { applyDucking(force: true) } else { sentDuckSteps = [:] }
     }
 
     // MARK: Mic state per output
@@ -144,7 +144,13 @@ final class AudioService: ObservableObject {
     // MARK: Ducking
 
     @Published private(set) var ducked = false
+    /// Current amount of ducking, 0 (full volume) … 1 (fully lowered): moves gradually for the fades.
+    @Published private(set) var duckAmount: Double = 0
     private var lastSpeech = Date.distantPast
+    private var fadeTimer: Timer?
+    private var lastFadeTick = Date()
+    /// Last volume step written per "bus.channel", so a fade only sends the steps that change.
+    private var sentDuckSteps: [String: Int] = [:]
 
     private func duckingTick() {
         let d = store.mixer.ducking
@@ -156,36 +162,70 @@ final class AudioService: ObservableObject {
 
     /// Lowered volume step whose gain is `reduction` dB below the one of `base` (gain table of the device).
     private static func duckedStep(_ base: Int, _ reductionDB: Double) -> Int {
-        guard base > 0 else { return 0 }
+        guard base > 0, reductionDB > 0.01 else { return base }
         let target = Double(meterGain[min(20, base)]) * pow(10, -reductionDB / 20)
         return (0...base).last { Double(meterGain[$0]) <= target } ?? 0
     }
 
     private func setDucked(_ on: Bool) {
         ducked = on
-        applyDucking()
+        startFade()
     }
 
-    /// Writes the (possibly lowered) volumes of the ducked channels.
-    func applyDucking() {
+    /// Fades the ducked channels down (fade out) or back up (fade in) over the chosen times.
+    private func startFade() {
+        guard fadeTimer == nil else { return }
+        lastFadeTick = Date()
+        fadeTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.fadeTick() }
+        }
+    }
+
+    private func fadeTick() {
+        let d = store.mixer.ducking
+        let now = Date()
+        let dt = now.timeIntervalSince(lastFadeTick) * 1000
+        lastFadeTick = now
+        let target: Double = ducked && d.enabled ? 1 : 0
+        let duration = max(1, target > duckAmount ? d.fadeOutMs : d.fadeInMs)
+        let step = dt / duration
+        duckAmount = target > duckAmount ? min(target, duckAmount + step) : max(target, duckAmount - step)
+        applyDucking()
+        if duckAmount == target { fadeTimer?.invalidate(); fadeTimer = nil }
+    }
+
+    /// Writes the (possibly lowered) volumes of the ducked channels. Only changed steps are sent, unless forced
+    /// (after the mixer volumes were rewritten).
+    func applyDucking(force: Bool = false) {
         guard let c = controller else { return }
         let p = store.mixer
         let d = p.ducking
         var buses: [MixBus] = d.streamOnly ? [.audience] : (p.dualMix ? MixBus.allCases : [.creator, .audience])
         if p.obsTracks { buses = [.creator] }
+        if force { sentDuckSteps = [:] }
         var cmds: [AXProtocol.Command] = []
         for name in d.channels {
             guard let ch = MixerChannel(rawValue: name), ch != .mic, let index = MixerChannel.allCases.firstIndex(of: ch) else { continue }
             for b in buses {
                 let mix = p.mixes[p.dualMix ? b : .creator] ?? MixState()
                 let base = Self.hw((mix.channels[ch]?.level ?? 50) * mix.level / 100)
-                let value = ducked && d.enabled ? Self.duckedStep(base, d.reductionDB) : base
+                let value = Self.duckedStep(base, d.enabled ? d.reductionDB * duckAmount : 0)
+                let key = "\(b.rawValue).\(ch.rawValue)"
+                guard sentDuckSteps[key] != value else { continue }
+                sentDuckSteps[key] = value
                 var cmd = AXProtocol.mixerVolume(mixer: b.rawValue, channel: index, value: value)
                 cmd.preDelayMs = 0
                 cmds.append(cmd)
             }
         }
         if !cmds.isEmpty { c.sendInOrder(cmds) }
+    }
+
+    /// Gain factor of the OBS copy of a ducked channel (the copies are lowered like the mixer).
+    func duckFactor(_ ch: MixerChannel) -> Float {
+        let d = store.mixer.ducking
+        guard d.enabled, duckAmount > 0, d.channels.contains(ch.rawValue) else { return 1 }
+        return Float(pow(10, -d.reductionDB * duckAmount / 20))
     }
 
     func applyMic() {
@@ -413,7 +453,7 @@ final class AudioService: ObservableObject {
         let mix = p.mixes[p.dualMix && !p.obsTracks ? .audience : .creator] ?? MixState()
         let c = mix.channels[ch] ?? ChannelState()
         if c.muted || mix.muted || (!p.obsTracks && !p.isRouted(ch, to: .stream)) { return 0 }
-        return Float(Self.meterGain[min(20, Self.hw(c.level * mix.level / 100))]) / 32768
+        return Float(Self.meterGain[min(20, Self.hw(c.level * mix.level / 100))]) / 32768 * duckFactor(ch)
     }
 
     func setDualMix(_ on: Bool) {

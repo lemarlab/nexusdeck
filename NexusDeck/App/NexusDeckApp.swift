@@ -87,7 +87,8 @@ final class AppState: ObservableObject {
             appRouter.setVisibility(dualMix: store.mixer.dualMix, obsTracks: store.mixer.obsTracks)
             appRouter.setNames(store.mixer)
         }
-        softGainSync = store.objectWillChange.debounce(for: .milliseconds(30), scheduler: RunLoop.main).prepend(()).sink { [self] _ in
+        softGainSync = store.objectWillChange.merge(with: audio.$duckAmount.map { _ in }.eraseToAnyPublisher())
+            .debounce(for: .milliseconds(10), scheduler: RunLoop.main).prepend(()).sink { [self] _ in
             let m = store.mixer
             let mix = m.mixes[m.dualMix ? m.activeMix : .creator] ?? MixState()
             func gain(_ ch: MixerChannel) -> Float {

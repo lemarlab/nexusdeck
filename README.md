@@ -26,7 +26,7 @@ A native macOS app (Swift/SwiftUI) to control the **AX310** mixer / stream deck,
 - **Mic mute modes**: mute the mic everywhere, only on stream, or only in chat (Chat Mic), from the Mic knob or a key.
 - **Cough key**: hold a key to mute the mic, release to unmute.
 - **Censor bleep**: hold a key to mute the mic and play a bleep (1 kHz tone or your own sound).
-- **Auto ducking**: music and game are lowered automatically while you speak (adjustable threshold, reduction, release and channels).
+- **Auto ducking**: music and game are lowered automatically while you speak, with smooth fade out / fade in (adjustable threshold, reduction, release, fade times and channels).
 - **Voice effect presets**: one key toggles a combination of reverb, echo and the hardware voice changer.
 - **Separate tracks for OBS**: every channel (System, Game, Chat, Line In, Console) is also available as an input device, so in OBS each source can go to its own audio track (e.g. music live but not in the VOD). The physical Line In can be captured on its own too.
 - **Only the devices you use**: Creator/Audience Mix and the OBS inputs appear on the Mac only when Dual Mix / OBS tracks are on. Devices are labelled `[AM-OUT]` (outputs) and `[AM-IN]` (inputs).
