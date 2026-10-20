@@ -109,9 +109,6 @@ struct LightingPreview: View {
     @Binding var area: LightingArea
     @EnvironmentObject var store: ProfileStore
     @EnvironmentObject var audio: AudioService
-    @EnvironmentObject var deck: DeckController
-    @EnvironmentObject var engine: ActionEngine
-    @State private var thumb: CGImage?
 
     var body: some View {
         let d = store.library.device
@@ -119,7 +116,7 @@ struct LightingPreview: View {
             HStack(spacing: 12) {
                 // Touch screen: static thumbnail of the first page
                 Group {
-                    if let thumb { Image(decorative: thumb, scale: 1).resizable() } else { Color(hex: "#0C0C0D") }
+                    FakeScreen()
                 }
                 .frame(width: 250, height: 150)
                 .brightness(-0.5 * (1 - Double(d.brightness) / 100))
@@ -164,11 +161,6 @@ struct LightingPreview: View {
                 .onTapGesture { area = .strip }
         }
         .padding(18)
-        .onAppear {
-            let r = ImageRenderer(content: PanelCanvas(deck: deck, store: store, images: engine.widgetImages, page: 0, forceOn: true))
-            r.scale = 1
-            thumb = r.cgImage
-        }
         .background(
             RoundedRectangle(cornerRadius: 24)
                 .fill(LinearGradient(colors: [Color(hex: "#2E2E31"), Color(hex: "#18181A")], startPoint: .top, endPoint: .bottom))
@@ -204,5 +196,40 @@ private struct ZoneOutline: ViewModifier {
             .padding(3)
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(on ? Theme.accent : .clear, lineWidth: 2))
             .contentShape(Rectangle())
+    }
+}
+
+/// Generic static screen for the lighting preview: a dashboard with six knobs at 50% and blank keys below.
+private struct FakeScreen: View {
+    private let tile = LinearGradient(colors: [Color(hex: "#2C2C30"), Color(hex: "#1E1E21")], startPoint: .top, endPoint: .bottom)
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 4) {
+                RoundedRectangle(cornerRadius: 5).fill(tile)
+                    .overlay(RoundedRectangle(cornerRadius: 6).fill(Theme.accent).frame(width: 22, height: 22))
+                    .frame(width: 44)
+                RoundedRectangle(cornerRadius: 5).fill(tile)
+                    .overlay(
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 8) {
+                            ForEach(0..<6, id: \.self) { _ in
+                                ZStack {
+                                    Circle().stroke(Color.white.opacity(0.12), lineWidth: 3)
+                                    Circle().trim(from: 0, to: 0.5).stroke(Theme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                                        .rotationEffect(.degrees(-90))
+                                }
+                                .frame(width: 24, height: 24)
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                    )
+            }
+            HStack(spacing: 4) {
+                ForEach(0..<5, id: \.self) { _ in RoundedRectangle(cornerRadius: 5).fill(tile) }
+            }
+            .frame(height: 30)
+        }
+        .padding(5)
+        .background(Color(hex: "#0C0C0D"))
     }
 }

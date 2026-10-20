@@ -10,8 +10,6 @@ struct PanelCanvas: View {
     /// Page to draw (default: the current one) and whether to draw the background (the editor slides the keys over a fixed background).
     var page: Int? = nil
     var drawsBackground = true
-    /// Draw as if the panel were on (static previews without the mixer).
-    var forceOn = false
 
     static let size = CGSize(width: AXProtocol.panelWidth, height: AXProtocol.panelHeight)
     static let cellW: CGFloat = size.width / 5
@@ -22,7 +20,7 @@ struct PanelCanvas: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             if drawsBackground { background } else { Color.clear.frame(width: Self.size.width, height: Self.size.height) }
-            if drawsBackground && (deck.panelOn || forceOn) && !store.library.device.autoHideGrid {
+            if drawsBackground && deck.panelOn && !store.library.device.autoHideGrid {
                 ForEach(0..<20, id: \.self) { i in
                     // Empty place: a soft glassy tile (no dashed border).
                     RoundedRectangle(cornerRadius: Self.radius)
@@ -34,7 +32,7 @@ struct PanelCanvas: View {
                         .offset(x: CGFloat(i % 5) * Self.cellW + Self.inset, y: CGFloat(i / 5) * Self.cellH + Self.inset)
                 }
             }
-            if deck.panelOn || forceOn {
+            if deck.panelOn {
                 ForEach(deck.keys(onPage: page ?? deck.currentPage)) { k in
                     face(k)
                         .frame(width: CGFloat(k.w) * Self.cellW - 2 * Self.inset, height: CGFloat(k.h) * Self.cellH - 2 * Self.inset)
