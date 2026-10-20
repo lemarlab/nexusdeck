@@ -5,7 +5,7 @@ extension Notification.Name {
 }
 
 enum MainSection: String, CaseIterable {
-    case hotkeys, mixer, mic, apps, matrix, ducking, obs
+    case hotkeys, mixer, mic, apps, matrix, ducking, obs, lighting, integrations
 
     enum ProfileKind { case hotkeys, mixer, mic }
     /// Which profile the header picker edits.
@@ -18,13 +18,15 @@ enum MainSection: String, CaseIterable {
     }
     var title: LocalizedStringKey {
         switch self {
-        case .hotkeys: "Tasti e widget"
+        case .hotkeys: "Widget"
         case .mixer: "Mixer"
         case .mic: "Microfono"
         case .apps: "Instradamento app"
         case .matrix: "Matrice audio"
         case .ducking: "Ducking"
         case .obs: "Tracce OBS"
+        case .lighting: "Illuminazione"
+        case .integrations: "Integrazioni"
         }
     }
     var tint: Color {
@@ -36,6 +38,8 @@ enum MainSection: String, CaseIterable {
         case .matrix: Color(hex: "#5E5CE6")
         case .ducking: Color(hex: "#30B0C7")
         case .obs: Color(hex: "#FF3B30")
+        case .lighting: Color(hex: "#FF9F0A")
+        case .integrations: Color(hex: "#0A84FF")
         }
     }
     var symbol: String {
@@ -47,12 +51,14 @@ enum MainSection: String, CaseIterable {
         case .matrix: "point.3.connected.trianglepath.dotted"
         case .ducking: "arrow.down.right.and.arrow.up.left"
         case .obs: "record.circle"
+        case .lighting: "lightbulb.fill"
+        case .integrations: "link"
         }
     }
 }
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, audioOutput, obs, streamlabs, linkApps, customLighting, interactiveLighting, backup, guide, feedback
+    case general, audioOutput, obs, streamlabs, backup, guide, feedback
     var id: String { rawValue }
     var symbol: String {
         switch self {
@@ -60,9 +66,6 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .audioOutput: "speaker.wave.2.fill"
         case .obs: "record.circle"
         case .streamlabs: "dot.radiowaves.left.and.right"
-        case .linkApps: "link"
-        case .customLighting: "lightbulb.fill"
-        case .interactiveLighting: "sparkles"
         case .backup: "externaldrive.fill"
         case .guide: "book.fill"
         case .feedback: "bubble.left.fill"
@@ -74,9 +77,6 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .audioOutput: Color(hex: "#FF2D55")
         case .obs: Color(hex: "#48484A")
         case .streamlabs: Color(hex: "#1E8C7E")
-        case .linkApps: Color(hex: "#0A84FF")
-        case .customLighting: Color(hex: "#FF9F0A")
-        case .interactiveLighting: Color(hex: "#BF5AF2")
         case .backup: Color(hex: "#30B0C7")
         case .guide: Color(hex: "#FF7A00")
         case .feedback: Color(hex: "#34C759")
@@ -88,9 +88,6 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .audioOutput: "Uscita audio"
         case .obs: "OBS"
         case .streamlabs: "Streamlabs Desktop"
-        case .linkApps: "Collega applicazioni"
-        case .customLighting: "Illuminazione personalizzata"
-        case .interactiveLighting: "Illuminazione interattiva"
         case .backup: "Backup e ripristino"
         case .guide: "Guida alle impostazioni"
         case .feedback: "Feedback"
@@ -118,7 +115,6 @@ final class UIState: ObservableObject {
     @Published var section: MainSection = .hotkeys
     @Published var sidebarExpanded = false
     @Published var settingsPage: SettingsPage?
-    @Published var showImport = false
     /// While the mixer is being set up at launch the window is blurred.
     @Published var loading = true
     /// Mixer link shown over the window: connecting (start), reconnecting (cable unplugged), not found (error).
@@ -180,10 +176,9 @@ struct ShellView: View {
         .tint(Theme.accent)
         // Open windows (settings, store…) close when the mixer link is lost.
         .onChange(of: ui.loading) { _, blocked in
-            if blocked && !ui.closing { ui.settingsPage = nil; ui.showImport = false; updater.showSheet = false }
+            if blocked && !ui.closing { ui.settingsPage = nil; updater.showSheet = false }
         }
         .sheet(item: $ui.settingsPage) { _ in SettingsWindow() }
-        .sheet(isPresented: $ui.showImport) { ImportWindow() }
         .sheet(isPresented: $updater.showSheet) { UpdateSheet() }
         .sheet(isPresented: Binding(get: { !store.library.tutorialDone }, set: { if !$0 { store.library.tutorialDone = true } })) { TutorialView() }
     }
@@ -209,6 +204,8 @@ struct ShellView: View {
         case .matrix: PageScroll { RoutingMatrix() }
         case .ducking: PageScroll { DuckingPage() }
         case .obs: PageScroll { OBSTracksPage() }
+        case .lighting: LightingPage()
+        case .integrations: PageScroll { LinkAppsPage() }
         }
     }
 }
@@ -319,7 +316,7 @@ struct HeaderBar: View {
             }
             UpdateBadge().padding(.leading, 14)
             Spacer()
-            if ui.section != .apps {
+            if ![.apps, .lighting, .integrations].contains(ui.section) {
             Text(label).font(.system(size: 12)).foregroundStyle(Theme.textDim).padding(.trailing, 8)
             profilePicker.frame(width: 220)
             Menu {
@@ -506,8 +503,7 @@ struct Sidebar: View {
             group("Audio")
             item(.apps); item(.matrix); item(.ducking); item(.obs)
             group("Altro")
-            row("square.and.arrow.down.fill", "Importa", tint: "#30B0C7") { ui.showImport = true }
-            row("link", "Integrazioni", tint: "#0A84FF") { ui.settingsPage = .linkApps }
+            item(.lighting); item(.integrations)
             Spacer()
             deviceCard
             row("gearshape.fill", "Impostazioni", tint: "#8E8E93") { ui.settingsPage = .general }

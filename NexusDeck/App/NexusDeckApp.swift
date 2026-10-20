@@ -184,11 +184,6 @@ final class AppState: ObservableObject {
     /// Developer switches: -importLegacy <folder>, -installPackage <url|path>.
     private func runDebugArguments() {
         let args = ProcessInfo.processInfo.arguments
-        if let i = args.firstIndex(of: "-importLegacy"), i + 1 < args.count {
-            let r = LegacyImporter.run(folder: URL(fileURLWithPath: args[i + 1]), into: store)
-            deck.profileChanged()
-            SDKHost.shared.debugLog("import: \(r.hotkeyProfiles) hotkey, \(r.keys) keys, \(r.mixerProfiles) mixer, \(r.dspProfiles) dsp, missing=\(r.missingPackages.sorted()), unknown=\(r.unknownActions.sorted())")
-        }
         if let i = args.firstIndex(of: "-activateProfile"), i + 1 < args.count,
            let p = store.library.hotkeyProfiles.last(where: { $0.title == args[i + 1] }) {
             editor.activate(p.id)
