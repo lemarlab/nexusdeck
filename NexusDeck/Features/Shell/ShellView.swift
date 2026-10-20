@@ -163,9 +163,11 @@ struct ShellView: View {
                         .onTapGesture {}
                         .gesture(DragGesture(minimumDistance: 0))
                 // One card for every state: its content changes, the card stays.
-                MixerLinkCard(link: ui.closing ? nil : ui.link) {
+                MixerLinkCard(link: ui.closing ? nil : ui.link, retry: {
                     ui.link = .connecting; NotificationCenter.default.post(name: .nexusRetryMixer, object: nil)
-                }
+                }, offline: {
+                    ui.dismissedNotFound = true; ui.loading = false
+                })
                 }
                 .transition(.opacity)
             }
@@ -216,6 +218,7 @@ struct MixerLinkCard: View {
     /// nil = quitting.
     let link: UIState.Link?
     let retry: () -> Void
+    let offline: () -> Void
 
     var body: some View {
         let failed = link == .notFound
@@ -231,9 +234,13 @@ struct MixerLinkCard: View {
             }
             Text(title).font(.system(size: 17, weight: .bold))
             if failed {
-                Text("NexusDeck funziona solo con il mixer collegato.\nCollega l'AX310 al Mac con il cavo USB: si ricollegherà da solo.")
+                Text("Collega l'AX310 al Mac con il cavo USB: NexusDeck si ricollegherà da solo.\nPuoi anche preparare tasti e profili senza mixer.")
                     .font(.system(size: 12.5)).foregroundStyle(Theme.textDim).multilineTextAlignment(.center)
-                FlatButton(title: "Riprova", prominent: true, width: 120, action: retry).padding(.top, 4)
+                HStack(spacing: 10) {
+                    FlatButton(title: "Utilizza senza mixer", width: 170, action: offline)
+                    FlatButton(title: "Riprova", prominent: true, width: 110, action: retry)
+                }
+                .padding(.top, 4)
             } else {
                 ProgressView().controlSize(.small).padding(.top, 2)
                 Text(subtitle).font(.system(size: 12.5)).foregroundStyle(Theme.textDim).multilineTextAlignment(.center)
