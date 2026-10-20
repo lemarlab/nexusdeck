@@ -189,11 +189,7 @@ struct ShellView: View {
                 DeckStage().frame(minWidth: 830, maxWidth: .infinity, maxHeight: .infinity).layoutPriority(1)
             }
         case .mic:
-            HStack(spacing: 0) {
-                MicColumn().frame(width: Theme.columnWidth).background(Theme.column)
-                Rectangle().fill(Theme.separator).frame(width: 0.5)
-                MicEffectsPanel()
-            }
+            MicPage()
         case .apps: AppRoutingPage()
         case .matrix: PageScroll { RoutingMatrix() }
         case .ducking: PageScroll { DuckingPage() }
