@@ -107,7 +107,7 @@ struct IntegrationsPage: View {
                     Spacer(minLength: 0)
                 }
                 Text(s.summary).font(.system(size: 12)).foregroundStyle(Theme.textDim).lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(height: 32, alignment: .topLeading)
                 Text(ok ? "Impostazioni" : "Collega").font(.system(size: 12, weight: .bold))
                     .foregroundStyle(ok ? Theme.accent : .white)
                     .padding(.horizontal, 14).frame(height: 26)
@@ -115,7 +115,7 @@ struct IntegrationsPage: View {
                     .clipShape(Capsule())
             }
             .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
             .background(Theme.card)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(on ? Theme.accent : Theme.cardBorder, lineWidth: on ? 2 : 1))

@@ -18,6 +18,7 @@ enum DebugSnapshot {
                     var f = win.frame; f.size = NSSize(width: w, height: h); win.setFrame(f, display: true); return
                 }
                 if parts.first == "mictab", parts.count > 1, let t = MicEffectTab(rawValue: parts[1]) { ui.micTab = t; return }
+                if parts.first == "offline" { ui.dismissedNotFound = true; ui.loading = false; return }
                 if parts.first == "lighttab" { NotificationCenter.default.post(name: Notification.Name("NexusDeck.lightTab"), object: nil); return }
                 if parts.first == "settings" { ui.settingsPage = parts.count > 1 ? SettingsPage(rawValue: parts[1]) : nil; return }
                 if parts.first == "action", parts.count > 1 {
