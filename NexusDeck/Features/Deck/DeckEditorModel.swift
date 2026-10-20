@@ -32,6 +32,7 @@ final class DeckEditorModel: ObservableObject {
         let maxX = slot == .touch ? columns : 2
         let maxY = slot == .touch ? rows : 2
         guard x >= 0, y >= 0, x + w <= maxX, y + h <= maxY else { return false }
+        let page = slot == .functionKey ? 0 : page
         for k in store.hotkey.keys where k.page == page && k.slot == slot && k.id != ignoring {
             let overlap = x < k.x + k.w && k.x < x + w && y < k.y + k.h && k.y < y + h
             if overlap { return false }
@@ -47,7 +48,7 @@ final class DeckEditorModel: ObservableObject {
         if slot == .functionKey, d.kind == .widget { message = "I widget non possono stare sui tasti funzione."; return false }
         let page = deck.currentPage
         guard fits(x: x, y: y, w: w, h: h, page: page, slot: slot) else { message = "Spazio insufficiente in questa posizione."; return false }
-        var key = KeyAssignment(actionID: actionID, slot: slot, page: page, x: x, y: y, w: w, h: h, states: ActionCatalog.defaultStates(for: d))
+        var key = KeyAssignment(actionID: actionID, slot: slot, page: slot == .functionKey ? 0 : page, x: x, y: y, w: w, h: h, states: ActionCatalog.defaultStates(for: d))
         if actionID == ActionID.group {
             store.hotkey.groupCounter += 1
             let gp = PageID.groupBase + store.hotkey.groupCounter
@@ -55,9 +56,12 @@ final class DeckEditorModel: ObservableObject {
             store.hotkey.keys.append(KeyAssignment(actionID: ActionID.groupBack, page: gp, x: 0, y: 0, states: ActionCatalog.defaultStates(for: ActionCatalog.descriptor(ActionID.groupBack))))
         }
         if actionID == ActionID.pageSwitch { key.settings["page"] = .number(0) }
-        store.hotkey.keys.append(key)
-        selectedKey = key.id
-        deck.needsRedraw.send()
+        // The new key pops in with a spring; the (heavier) hardware panel image is redrawn once it has settled.
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+            store.hotkey.keys.append(key)
+            selectedKey = key.id
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [deck] in deck.needsRedraw.send() }
         return true
     }
 
@@ -78,11 +82,14 @@ final class DeckEditorModel: ObservableObject {
         if k.slot != slot, k.w > 1 || k.h > 1 { return false }
         let page = deck.currentPage
         guard fits(x: x, y: y, w: k.w, h: k.h, page: page, slot: slot, ignoring: k.id) else { message = "Spazio insufficiente in questa posizione."; return false }
-        store.hotkey.keys[i].x = x
-        store.hotkey.keys[i].y = y
-        store.hotkey.keys[i].page = page
-        store.hotkey.keys[i].slot = slot
-        deck.needsRedraw.send()
+        // Glides to the new place; the hardware panel image follows once the move has finished.
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+            store.hotkey.keys[i].x = x
+            store.hotkey.keys[i].y = y
+            store.hotkey.keys[i].page = slot == .functionKey ? 0 : page
+            store.hotkey.keys[i].slot = slot
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [deck] in deck.needsRedraw.send() }
         return true
     }
 

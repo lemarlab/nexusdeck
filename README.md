@@ -13,7 +13,7 @@ A native macOS app (Swift/SwiftUI) to control the **AX310** mixer / stream deck,
 ## Features
 
 - Keys and widgets on the touch panel, pages, folders, multi-actions
-- Audio mixer: Single/Dual Mix, volumes, mutes, mic monitoring, level meters
+- Audio mixer: Single/Dual Mix, vertical channel strips, volumes, mutes, mic monitoring, level meters
 - Microphone: gain, 48V phantom power, noise gate, compressor, equalizer, echo, reverb
 - Lighting for keys, knobs and LED strip
 - Integrations: OBS, Streamlabs Desktop, Twitch, YouTube, Spotify, Discord, Voicemod
@@ -31,7 +31,9 @@ A native macOS app (Swift/SwiftUI) to control the **AX310** mixer / stream deck,
 - **Separate tracks for OBS**: every channel (System, Game, Chat, Line In, Console) is also available as an input device, so in OBS each source can go to its own audio track (e.g. music live but not in the VOD). The physical Line In can be captured on its own too.
 - **Only the devices you use**: Creator/Audience Mix and the OBS inputs appear on the Mac only when Dual Mix / OBS tracks are on. Devices are labelled `[AM-OUT]` (outputs) and `[AM-IN]` (inputs).
 - **Custom channel names and icons**: rename a channel (e.g. "Music" instead of System) and pick its icon; the Mac devices are renamed too.
-- **Built-in updates**: NexusDeck checks GitHub for new versions and updates itself.
+- **Built-in updates**: NexusDeck checks GitHub for new versions, shows the release notes and updates itself.
+- **macOS-style design**: native sidebar, light and dark appearance, translucent materials, and a combined Keys / Mixer stage with smooth animations.
+- **Polished device experience**: start-up and shutdown animations on the panel, LEDs that stay off until the mixer is set up and turn off when NexusDeck quits, smooth page slides, fixed function keys.
 - **Noise gate calibration**: one click measures your room noise and sets the threshold.
 - **Native Discord and Voicemod integrations**: built in and switched on/off, no plug-ins to download.
 - **Native Apple Silicon app**, no Intel/Rosetta components.
@@ -57,10 +59,6 @@ xcodebuild -project NexusDeck.xcodeproj -scheme NexusDeck -configuration Release
 ```
 
 The audio driver (`AudioPlugin/`) is built automatically as part of the app build.
-
-## Credits
-
-- Studio microphone icon by [Icons8](https://icons8.com).
 
 ## License
 

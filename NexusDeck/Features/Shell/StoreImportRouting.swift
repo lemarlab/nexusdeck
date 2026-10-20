@@ -153,12 +153,12 @@ private struct RoutingGraph: View {
     private func node(_ t: String, symbol: String? = nil, text: String? = nil, highlight: Bool = false) -> some View {
         VStack(spacing: 4) {
             Text(t).font(.system(size: 9, weight: .semibold)).foregroundStyle(highlight ? orange : Theme.textDim)
-                .frame(maxWidth: .infinity).padding(.vertical, 2).background(Color(hex: "#3A3A3A"))
+                .frame(maxWidth: .infinity).padding(.vertical, 2).background(Theme.field)
             if let symbol { Image(systemName: symbol).font(.system(size: 14)) }
             if let text { Text(text).font(.system(size: 10, weight: .bold)).foregroundStyle(orange) }
         }
         .frame(width: 66, height: 44)
-        .background(Color(hex: "#2B2B2B"))
+        .background(Theme.card)
         .overlay(Rectangle().strokeBorder(Color.white.opacity(0.1)))
     }
 
@@ -171,17 +171,17 @@ private struct RoutingGraph: View {
             }
             Circle().fill(orange).frame(width: 6, height: 6)
         }
-        .padding(6).frame(width: 100, height: 28).background(Color(hex: "#2B2B2B"))
+        .padding(6).frame(width: 100, height: 28).background(Theme.card)
     }
 
     private func label(_ t: String) -> some View {
-        Text(t).font(.system(size: 10)).foregroundStyle(orange).padding(6).background(Color(hex: "#2B2B2B"))
+        Text(t).font(.system(size: 10)).foregroundStyle(orange).padding(6).background(Theme.card)
     }
 
     private func output(_ t: String, y: CGFloat, level: Int? = nil) -> some View {
         VStack(spacing: 4) {
             Text(t).font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.textDim)
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 6).padding(.vertical, 2).background(Color(hex: "#3A3A3A"))
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 6).padding(.vertical, 2).background(Theme.field)
             if let level {
                 HStack {
                     Image(systemName: "speaker.wave.2.fill").font(.system(size: 9))
@@ -195,7 +195,7 @@ private struct RoutingGraph: View {
             }
         }
         .frame(width: 180, height: 44)
-        .background(Color(hex: "#2B2B2B"))
+        .background(Theme.card)
         .offset(x: 700, y: y)
     }
 }

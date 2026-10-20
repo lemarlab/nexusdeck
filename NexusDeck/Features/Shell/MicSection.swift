@@ -16,7 +16,7 @@ struct VSliderCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text(title).font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.textMid)
+            Text(title).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Theme.text)
                 .multilineTextAlignment(.center).lineLimit(2)
                 .frame(height: 40, alignment: .top)
                 .padding(.top, 14)
@@ -26,19 +26,23 @@ struct VSliderCard: View {
             Spacer(minLength: 10)
             HStack(spacing: 4) {
                 Text(decimals == 0 ? "\(Int(value.rounded()))" : String(format: "%.\(decimals)f", value))
-                    .font(.system(size: 14, weight: .bold)).monospacedDigit()
-                    .frame(width: 48, height: 22).background(Color(hex: "#2A2A2A"))
+                    .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                    .frame(width: 50, height: 24).background(Theme.field)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 VStack(spacing: 2) {
                     Button { value = min(range.upperBound, value + step) } label: { Image(systemName: "arrowtriangle.up.fill") }
                     Button { value = max(range.lowerBound, value - step) } label: { Image(systemName: "arrowtriangle.down.fill") }
                 }
-                .font(.system(size: 7)).buttonStyle(.plain).foregroundStyle(Theme.textMid)
+                .font(.system(size: 7)).buttonStyle(.plain).foregroundStyle(Theme.textDim)
                 Text(unit).font(.system(size: 10)).foregroundStyle(Theme.textDim).frame(width: 20, alignment: .leading)
             }
             .padding(.bottom, 14)
         }
         .frame(width: width, height: height)
-        .background(Theme.sliderCard)
+        .background(Theme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.cardBorder, lineWidth: 1))
+        .shadow(color: .black.opacity(0.04), radius: 1.5, y: 1)
         .opacity(enabled ? 1 : 0.45)
         .allowsHitTesting(enabled)
     }
@@ -53,11 +57,12 @@ struct VerticalTrack: View {
         GeometryReader { g in
             let f = CGFloat((value - range.lowerBound) / (range.upperBound - range.lowerBound))
             ZStack(alignment: .bottom) {
-                Rectangle().fill(Color(hex: "#4B3718")).frame(width: 3)
-                Rectangle().fill(Theme.accent).frame(width: 3, height: g.size.height * f)
-                Circle().fill(.white).frame(width: 11, height: 11)
-                    .overlay(Circle().strokeBorder(Theme.accent, lineWidth: 1.5))
-                    .offset(y: -g.size.height * f + 5.5)
+                Capsule().fill(Theme.track).frame(width: 5)
+                Capsule().fill(Theme.accent).frame(width: 5, height: max(0, g.size.height * f))
+                Circle().fill(.white).frame(width: 18, height: 18)
+                    .shadow(color: .black.opacity(0.3), radius: 1.5, y: 0.5)
+                    .overlay(Circle().strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5))
+                    .offset(y: -g.size.height * f + 9)
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
@@ -81,46 +86,33 @@ struct MicColumn: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Impostazioni microfono").font(.system(size: 14, weight: .bold))
-                Spacer()
-                Image(systemName: "info.circle").font(.system(size: 14)).foregroundStyle(Theme.textDim)
-                    .help("Regola guadagno ed effetti del microfono collegato al controller.")
-            }
-            .padding(.leading, 14).padding(.trailing, 16).frame(height: 40)
-            Rectangle().fill(Theme.separator.opacity(0.5)).frame(height: 1)
             VStack(spacing: 0) {
                 HStack(spacing: 18) {
-                    Text("Mic").font(.system(size: 12)).foregroundStyle(Theme.textMid)
+                    Text("Microfono").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.textFaint).textCase(.uppercase)
                     Spacer()
                     Button { chooseImage() } label: { Image(systemName: "photo.on.rectangle") }.help("Immagine del microfono")
                     Button { name = store.mixer.micName; renaming = true } label: { Image(systemName: "pencil") }.help("Rinomina microfono")
                 }
                 .font(.system(size: 13)).buttonStyle(.plain).foregroundStyle(Theme.textDim)
                 .padding(.horizontal, 14).frame(height: 40)
-                micImage.frame(height: 150).padding(.top, 10)
-                Text(store.mixer.micName).font(.system(size: 13.5, weight: .medium)).padding(.top, 22).padding(.bottom, 28)
+                micImage.frame(height: 144).padding(.top, 4)
+                Text(store.mixer.micName).font(.system(size: 14, weight: .semibold)).padding(.top, 14).padding(.bottom, 20)
             }
-            .background(Theme.preview)
-            Rectangle().fill(Theme.separator).frame(height: 1)
             VStack(alignment: .leading, spacing: 10) {
                 Text("Tipo di microfono").font(.system(size: 12)).foregroundStyle(Theme.textMid)
                 DarkPicker(selection: Binding(get: { store.mixer.micType }, set: { t in
                     if t == .xlrCondenser && !store.mixer.phantom48V { confirm48V = true } else { store.mixer.micType = t; audio.applyMic() }
                 }), options: MicType.allCases.map { ($0, $0.title) }, height: 29)
             }
-            .padding(.horizontal, 11).padding(.vertical, 14)
-            .background(Theme.preview)
-            Rectangle().fill(Theme.separator).frame(height: 1)
+            .padding(.horizontal, 14).padding(.vertical, 10)
             VStack {
                 VSliderCard(title: "Guadagno",
                             value: Binding(get: { Double(store.mixer.currentGainDB) }, set: { store.mixer.currentGainDB = Int($0); audio.applyMic() }),
                             range: 0...Double(MicGain.maxDB), unit: "dB", height: 299)
-                    .padding(.top, 38)
+                    .padding(.top, 16)
                 Spacer()
             }
             .frame(maxWidth: .infinity)
-            .background(Theme.preview)
         }
         .confirmationDialog("Attivare l'alimentazione phantom +48 V?", isPresented: $confirm48V) {
             Button("Attiva +48 V") { store.mixer.micType = .xlrCondenser; audio.applyMic() }
@@ -137,7 +129,7 @@ struct MicColumn: View {
         if !store.mixer.micImage.isEmpty, let img = NSImage(contentsOf: ProfileStore.iconFolder.appendingPathComponent(store.mixer.micImage)) {
             Image(nsImage: img).resizable().scaledToFit()
         } else {
-            MicIllustration().frame(width: 170, height: 140)
+            MicIllustration()
         }
     }
 
@@ -150,12 +142,16 @@ struct MicColumn: View {
 }
 
 /// Our own drawing of a broadcast microphone on a yoke mount.
+/// Microphone artwork: an app-icon style tile with the SF Symbol microphone.
 struct MicIllustration: View {
     var body: some View {
-        // Studio microphone icon by Icons8 (icons8.com), tinted with the accent colour.
-        Image("MicStudio").renderingMode(.template).resizable().interpolation(.high)
-            .aspectRatio(contentMode: .fit).frame(width: 100, height: 100)
-            .foregroundStyle(Theme.accent)
+        RoundedRectangle(cornerRadius: 24)
+            .fill(LinearGradient(colors: [Color(hex: "#FFB340"), Color(hex: "#FF7A00")], startPoint: .top, endPoint: .bottom))
+            .frame(width: 96, height: 96)
+            .overlay(Image(systemName: "mic.fill").font(.system(size: 44, weight: .medium)).foregroundStyle(.white))
+            .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(Color.white.opacity(0.25), lineWidth: 1))
+            .shadow(color: Color(hex: "#FF7A00").opacity(0.4), radius: 10, y: 5)
+            .frame(width: 140, height: 130)
     }
 }
 
@@ -203,10 +199,8 @@ struct MicEffectsPanel: View {
     var body: some View {
         GeometryReader { g in
             VStack(alignment: .leading, spacing: 0) {
-                Text("Effetti microfono").font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.textMid)
-                    .padding(.leading, 11).frame(height: 46)
-                tabs
-                header.padding(.horizontal, 26).frame(height: 66)
+                tabs.padding(.top, 4)
+                header.padding(.horizontal, 6).frame(height: 66)
                 Spacer(minLength: 0)
                 content.frame(maxWidth: .infinity)
                 Spacer(minLength: 0)
@@ -214,31 +208,47 @@ struct MicEffectsPanel: View {
                     Image(systemName: "info.circle")
                     Text("Se l'audio mixato con gli effetti suona male, prova a ridurre guadagno o livelli degli effetti.")
                 }
-                .font(.system(size: 13)).foregroundStyle(Theme.textMid)
-                .padding(.leading, 20).padding(.bottom, 18)
+                .font(.system(size: 12)).foregroundStyle(Theme.textFaint)
+                .padding(.leading, 6).padding(.bottom, 6)
             }
-            .frame(width: max(600, g.size.width - 40), height: max(500, g.size.height - 108))
-            .background(Theme.effectsPanel)
-            .padding(.leading, 20).padding(.top, 88)
+            .frame(width: max(600, g.size.width - 56), height: max(500, g.size.height - 48))
+            .padding(.leading, 28).padding(.top, 24)
         }
     }
 
     private var tabs: some View {
-        HStack(spacing: 0) {
+        // Effect chain: one segment per block, a dot shows which effects are on.
+        HStack(spacing: 2) {
             ForEach(MicEffectTab.allCases) { t in
-                Button { ui.micTab = t } label: {
-                    VStack(spacing: 0) {
-                        Text(t.title).font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(ui.micTab == t ? Theme.accent : Theme.textDim)
-                            .frame(maxWidth: .infinity).frame(height: 40)
-                        Rectangle().fill(ui.micTab == t ? Theme.accent : .clear).frame(height: 2)
+                let on = ui.micTab == t
+                Button { withAnimation(.easeOut(duration: 0.12)) { ui.micTab = t } } label: {
+                    HStack(spacing: 6) {
+                        Circle().fill(effectOn(t) ? Theme.accent : Theme.track).frame(width: 7, height: 7)
+                        Text(t.title).font(.system(size: 12.5, weight: on ? .semibold : .regular))
                     }
+                    .foregroundStyle(on ? Theme.text : Theme.textDim)
+                    .frame(maxWidth: .infinity).frame(height: 28)
+                    .background(on ? Theme.card : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .shadow(color: .black.opacity(on ? 0.12 : 0), radius: 1, y: 0.5)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.textDim.opacity(0.6)).frame(height: 1).offset(y: 1) }
+        .padding(2)
+        .background(Theme.field)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func effectOn(_ t: MicEffectTab) -> Bool {
+        switch t {
+        case .noiseGate: store.dsp.noiseGateEnabled
+        case .compressor: store.dsp.compressorEnabled
+        case .equalizer: store.dsp.eqEnabled
+        case .echo: store.dsp.echoEnabled
+        case .reverb: store.dsp.reverbEnabled
+        }
     }
 
     private var enabledBinding: Binding<Bool> {
@@ -254,8 +264,8 @@ struct MicEffectsPanel: View {
     private var header: some View {
         HStack(spacing: 10) {
             PillToggle(isOn: enabledBinding)
-            Text(ui.micTab.title).font(.system(size: 16, weight: .bold))
-                .foregroundStyle(enabledBinding.wrappedValue ? Theme.accent : Theme.textDim)
+            Text(ui.micTab.title).font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(enabledBinding.wrappedValue ? Theme.text : Theme.textDim)
             Spacer()
             if ui.micTab == .noiseGate {
                 if let left = calibrating {

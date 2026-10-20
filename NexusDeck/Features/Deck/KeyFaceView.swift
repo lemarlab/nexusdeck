@@ -64,12 +64,14 @@ struct KeyFaceView: View {
     private var symbolFace: some View {
         GeometryReader { g in
             let h = g.size.height
-            let titleSize = h * 0.235 * style.size / 13
+            let titleSize = h * 0.15 * style.size / 13
             ZStack {
-                Color(hex: state.background)
-                VStack(spacing: h * 0.02) {
+                // Soft vertical gradient of the key colour, like the app icons of macOS.
+                LinearGradient(colors: [Color(hex: Theme.lighten(state.background, 0.14)), Color(hex: state.background)],
+                               startPoint: .top, endPoint: .bottom)
+                VStack(spacing: h * 0.05) {
                     Image(systemName: String(state.image.dropFirst(3)))
-                        .font(.system(size: h * (overlayText == nil ? 0.36 : 0.28), weight: .medium))
+                        .font(.system(size: h * (overlayText == nil ? 0.3 : 0.24), weight: .medium))
                         .foregroundStyle(.white)
                     if let live = overlayText {
                         // Live value (CPU, counters, now playing…) in place of the title.
@@ -80,8 +82,9 @@ struct KeyFaceView: View {
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, h * 0.05)
                     } else if !state.title.isEmpty {
-                        Text(state.title)
+                        Text(state.title.uppercased())
                             .font(style.fontFamily.isEmpty ? .system(size: titleSize, weight: style.bold ? .heavy : .bold) : .custom(style.fontFamily, size: titleSize).weight(.bold))
+                            .tracking(titleSize * 0.04)
                             .italic(style.italic)
                             .underline(style.underline)
                             .foregroundStyle(Color(hex: style.colorHex))

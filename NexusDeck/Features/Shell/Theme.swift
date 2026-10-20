@@ -1,39 +1,43 @@
 import SwiftUI
 import AppKit
 
-/// Visual language measured from the reference screenshots (values in points).
+/// Visual language of the app (values in points).
 enum Theme {
-    // Colors
-    static let accent = Color(hex: "#FF9900")
-    static let accentDim = Color(hex: "#4F3B1C")
-    static let titleLine = Color(hex: "#BF7F33")
-    static let window = Color(hex: "#000000")
-    static let topBar = Color(hex: "#2D2D2D")
-    static let sidebar = Color(hex: "#363636")
-    static let column = Color(hex: "#232323")
-    static let columnHeader = Color(hex: "#282828")
-    static let canvas = Color(hex: "#000000")
-    static let panel = Color(hex: "#282828")
-    static let panelHeader = Color(hex: "#242424")
-    static let preview = Color(hex: "#1E1E1E")
-    static let card = Color(hex: "#323232")
-    static let field = Color(hex: "#1E1E1E")
-    static let separator = Color(hex: "#474747")
-    static let text = Color(hex: "#FFFFFF")
-    static let textDim = Color(hex: "#A1A1A1")
-    static let textMid = Color(hex: "#C8C8C8")
+    // Colors: follow the Mac's light / dark appearance (macOS-style palette).
+    static let accent = Color(hex: "#FF8A1F")
+    static let accentDim = Color.dynamic(light: "#FFE3C7", dark: "#4F3B1C")
+    static let titleLine = accent
+    static let window = Color.dynamic(light: "#F2F2F5", dark: "#161618")
+    static let topBar = Color.dynamic(light: "#F6F6F8", dark: "#262629")
+    static let sidebar = Color.dynamic(light: "#E8E8EC", dark: "#28282C")
+    static let column = Color.dynamic(light: "#FAFAFC", dark: "#1E1E21")
+    static let columnHeader = column
+    static let canvas = Color.dynamic(light: "#F2F2F5", dark: "#161618")
+    static let panel = Color.dynamic(light: "#F7F7F9", dark: "#232326")
+    static let panelHeader = Color.dynamic(light: "#F7F7F9", dark: "#232326")
+    static let preview = Color.dynamic(light: "#FFFFFF", dark: "#2A2A2D")
+    static let card = Color.dynamic(light: "#FFFFFF", dark: "#2A2A2D")
+    static let cardBorder = Color.dynamic(light: "#000000", dark: "#FFFFFF", alpha: 0.07)
+    static let field = Color.dynamic(light: "#000000", dark: "#FFFFFF", alpha: 0.06)
+    static let separator = Color.dynamic(light: "#000000", dark: "#FFFFFF", alpha: 0.10)
+    static let text = Color.dynamic(light: "#1D1D1F", dark: "#F5F5F7")
+    static let textDim = Color.dynamic(light: "#6E6E73", dark: "#A1A1A6")
+    static let textMid = Color.dynamic(light: "#3A3A3C", dark: "#D8D8DC")
+    static let textFaint = Color.dynamic(light: "#A1A1A6", dark: "#6E6E73")
+    static let selection = Color.dynamic(light: "#000000", dark: "#FFFFFF", alpha: 0.08)
+    static let track = Color.dynamic(light: "#000000", dark: "#FFFFFF", alpha: 0.12)
     static let deviceBody = Color(hex: "#282625")
     static let devicePlate = Color(hex: "#43403E")
     static let bezel = Color(hex: "#1E1E1E")
     static let knobBlue = Color(hex: "#007DFF")
     static let tilePurple = Color(hex: "#352994")
     static let tileBlue = Color(hex: "#3D9BE9")
-    static let settingsBg = Color(hex: "#292929")
-    static let settingsMenuSel = Color(hex: "#3C3C3C")
-    static let settingsFooter = Color(hex: "#252525")
-    static let button = Color(hex: "#1B1D1D")
-    static let effectsPanel = Color(hex: "#292929")
-    static let sliderCard = Color(hex: "#1E1E1E")
+    static let settingsBg = Color.dynamic(light: "#F5F5F7", dark: "#1E1E20")
+    static let settingsMenuSel = selection
+    static let settingsFooter = Color.dynamic(light: "#ECECEF", dark: "#252527")
+    static let button = Color.dynamic(light: "#E5E5EA", dark: "#2C2C2E")
+    static let effectsPanel = canvas
+    static let sliderCard = card
     static let deviceBlue = Color(hex: "#000826")
     static let deviceRed = Color(hex: "#0A0000")
     static let knobBlueLegacy = Color(hex: "#2F8CFF")
@@ -47,18 +51,45 @@ enum Theme {
     static let propertiesHeight: CGFloat = 270
 
     /// Tile colors per action family.
+    /// One colour per library category (the whole family shares it), used for icons and new keys.
     static func tileHex(for actionID: String) -> String {
-        switch actionID.split(separator: ".").first.map(String.init) ?? "" {
-        case "system": "#3D9BE9"
-        case "obs": "#5B5B66"
+        let cat = ActionCatalog.categories.first { c in c.actions.contains { $0.id == actionID } }?.id
+            ?? (actionID.hasPrefix("pkg:") ? "pkg" : "")
+        return categoryHex(cat)
+    }
+
+    static func categoryHex(_ category: String) -> String {
+        switch category {
+        case "device": "#FF7A00"
+        case "system": "#0A84FF"
+        case "multi": "#5E5CE6"
+        case "audio": "#FF2D55"
+        case "obs": "#48484A"
         case "slobs": "#1E8C7E"
-        case "twitch": "#7C3AED"
-        case "youtube": "#C62828"
-        case "spotify": "#1E7F3C"
-        case "discord": "#4752C4"
-        case "voicemod": "#00897B"
-        case "pkg": "#2B2B2B"
-        default: "#352994"
+        case "youtube": "#E62117"
+        case "twitch": "#9146FF"
+        case "discord": "#5865F2"
+        case "voicemod": "#00A88E"
+        case "spotify": "#1DB954"
+        case "pkg": "#3A3A3C"
+        default: "#5E5CE6"
+        }
+    }
+
+    /// Palette of the development builds after 0.0.7 (colour by action-ID prefix), for migration.
+    static func prefixHex(for actionID: String) -> String {
+        switch actionID.split(separator: ".").first.map(String.init) ?? "" {
+        case "system": "#0A84FF"
+        case "mixer": "#FF7A00"
+        case "obs": "#48484A"
+        case "slobs": "#1E8C7E"
+        case "twitch": "#9146FF"
+        case "youtube": "#E62117"
+        case "spotify": "#1DB954"
+        case "discord": "#5865F2"
+        case "voicemod": "#00A88E"
+        case "pkg": "#3A3A3C"
+        default: "#5E5CE6"
         }
     }
     static func tileColor(for actionID: String) -> Color { Color(hex: tileHex(for: actionID)) }
@@ -80,23 +111,24 @@ enum Theme {
 
 // MARK: - Reusable controls
 
-/// Small orange pill toggle.
+/// macOS-style switch in the accent colour.
 struct PillToggle: View {
     @Binding var isOn: Bool
     var body: some View {
         Capsule()
-            .fill(isOn ? Theme.accent : Color.white.opacity(0.18))
-            .frame(width: 18, height: 10)
+            .fill(isOn ? Theme.accent : Theme.track)
+            .frame(width: 32, height: 19)
             .overlay(alignment: isOn ? .trailing : .leading) {
-                Circle().fill(isOn ? Color.white : Color(hex: "#9A9A9A")).frame(width: 6, height: 6).padding(2)
+                Circle().fill(Color.white).frame(width: 15, height: 15).padding(2)
+                    .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
             }
-            .overlay(Capsule().strokeBorder(isOn ? .clear : Color(hex: "#7A7A7A"), lineWidth: 1))
-            .animation(.easeInOut(duration: 0.12), value: isOn)
+            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isOn)
+            .contentShape(Capsule())
             .onTapGesture { isOn.toggle() }
     }
 }
 
-/// Thin horizontal slider: orange fill, brown track, white round knob.
+/// Horizontal slider: accent fill on a soft track, white round knob.
 struct ThinSlider: View {
     @Binding var value: Double
     var range: ClosedRange<Double> = 0...100
@@ -109,11 +141,12 @@ struct ThinSlider: View {
         GeometryReader { g in
             let f = CGFloat((value - range.lowerBound) / (range.upperBound - range.lowerBound))
             ZStack(alignment: .leading) {
-                Capsule().fill(Theme.accentDim).frame(height: 2)
-                Capsule().fill(Theme.accent).frame(width: max(0, g.size.width * f), height: 2)
-                Circle().fill(.white).frame(width: 10, height: 10)
-                    .shadow(color: .black.opacity(0.4), radius: 1)
-                    .offset(x: g.size.width * f - 5)
+                Capsule().fill(Theme.track).frame(height: 4)
+                Capsule().fill(Theme.accent).frame(width: max(0, g.size.width * f), height: 4)
+                Circle().fill(.white).frame(width: 15, height: 15)
+                    .shadow(color: .black.opacity(0.3), radius: 1.5, y: 0.5)
+                    .overlay(Circle().strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5))
+                    .offset(x: g.size.width * f - 7.5)
             }
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
@@ -124,11 +157,11 @@ struct ThinSlider: View {
                 }
                 .onEnded { _ in onCommit?() })
         }
-        .frame(height: 14)
+        .frame(height: 18)
     }
 }
 
-/// Flat dark button used in dialogs ("Apply", "Close", ...).
+/// Rounded push button ("Apply", "Close", ...); prominent = accent.
 struct FlatButton: View {
     let title: LocalizedStringKey
     var prominent = false
@@ -137,11 +170,13 @@ struct FlatButton: View {
     @Environment(\.isEnabled) private var enabled
     var body: some View {
         Button(action: action) {
-            Text(title).font(.system(size: 12))
-                .frame(width: width, height: 24)
-                .background(prominent ? Theme.accent : Theme.button)
-                .foregroundStyle(prominent ? Color.black : (enabled ? Theme.textMid : Color(hex: "#555555")))
-                .clipShape(RoundedRectangle(cornerRadius: 2))
+            Text(title).font(.system(size: 12.5, weight: prominent ? .semibold : .regular))
+                .frame(width: width, height: 26)
+                .background(prominent ? Theme.accent : Theme.card)
+                .foregroundStyle(prominent ? Color.white : (enabled ? Theme.text : Theme.textFaint))
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(prominent ? .clear : Theme.cardBorder, lineWidth: 1))
+                .shadow(color: .black.opacity(prominent ? 0 : 0.05), radius: 1, y: 0.5)
         }
         .buttonStyle(.plain)
     }
@@ -184,9 +219,10 @@ struct DropdownField<T: Hashable>: View {
         }
         .padding(.horizontal, 9)
         .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
-        .background(Theme.field)
-        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(open ? Theme.accent : Color.white.opacity(0.10), lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .background(Theme.card)
+        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(open ? Theme.accent : Theme.cardBorder, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .shadow(color: .black.opacity(0.04), radius: 1, y: 0.5)
         .contentShape(Rectangle())
         .background(DropdownAnchorView(box: anchor))
         .onTapGesture { toggle() }
@@ -244,10 +280,10 @@ final class DropdownPanel: ObservableObject {
         p.animationBehavior = .none
         let host = NSHostingView(rootView: content()
             .frame(width: width, height: height)
-            .background(Color(hex: "#232323"))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-            .preferredColorScheme(.dark))
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.cardBorder, lineWidth: 1)))
+        host.appearance = window.effectiveAppearance
         p.contentView = host
         window.addChildWindow(p, ordered: .above)
         panel = p
@@ -309,13 +345,16 @@ private struct DropdownRow: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.accent).opacity(selected ? 1 : 0)
-                Text(title).font(.system(size: 12)).foregroundStyle(selected ? Theme.text : Theme.textMid).lineLimit(1)
+                    .foregroundStyle(hover ? Color.white : Theme.accent).opacity(selected ? 1 : 0)
+                Text(title).font(.system(size: 12.5)).lineLimit(1)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
             .frame(height: 28)
-            .background(hover ? Theme.accent.opacity(0.22) : Color.clear)
+            .background(hover ? Theme.accent.opacity(0.85) : Color.clear)
+            .foregroundStyle(hover ? Color.white : Theme.text)
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .padding(.horizontal, 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -339,7 +378,7 @@ struct DropdownRowField<T: Hashable>: View {
 
     var body: some View {
         LabeledContent(title) {
-            DropdownField(selection: $selection, options: options).frame(minWidth: 180, maxWidth: 280)
+            DropdownField(selection: $selection, options: options).frame(maxWidth: .infinity)
         }
     }
 }
@@ -354,23 +393,45 @@ struct DarkPicker<T: Hashable>: View {
     }
 }
 
+/// Grouped settings box (System Settings style): title above, rows separated by hairlines.
 struct SectionCard<Content: View>: View {
     let title: LocalizedStringKey
     @ViewBuilder var content: Content
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(title).font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.textMid)
-            content
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 13, weight: .semibold)).padding(.leading, 4)
+            VStack(alignment: .leading, spacing: 0) {
+                _VariadicView.Tree(DividedRows()) {
+                    content
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.cardBorder, lineWidth: 1))
         }
-        .padding(.horizontal, 20).padding(.vertical, 18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card)
+        .padding(.horizontal, 24).padding(.vertical, 6)
     }
 }
 
 extension View {
     func darkField(height: CGFloat = 24) -> some View {
-        self.textFieldStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.text)
-            .padding(.horizontal, 6).frame(height: height).background(Theme.field)
+        self.textFieldStyle(.plain).font(.system(size: 12.5)).foregroundStyle(Theme.text)
+            .padding(.horizontal, 8).frame(height: max(height, 26)).background(Theme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.cardBorder, lineWidth: 1))
+    }
+}
+
+extension Color {
+    /// A colour that follows the light / dark appearance.
+    static func dynamic(light: String, dark: String, alpha: Double = 1) -> Color {
+        func ns(_ hex: String) -> NSColor {
+            var h = hex; if h.hasPrefix("#") { h.removeFirst() }
+            let v = Int(h, radix: 16) ?? 0
+            return NSColor(srgbRed: CGFloat(v >> 16 & 0xFF) / 255, green: CGFloat(v >> 8 & 0xFF) / 255, blue: CGFloat(v & 0xFF) / 255, alpha: alpha)
+        }
+        let l = ns(light), d = ns(dark)
+        return Color(nsColor: NSColor(name: nil) { a in a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? d : l })
     }
 }

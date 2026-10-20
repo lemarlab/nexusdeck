@@ -31,6 +31,16 @@ struct LEDSetting: Codable, Hashable {
     var itemColors = ["#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF", "#00FFFF"]
 }
 
+extension LEDSetting {
+    /// Colour a knob ring shows on the device (index 0…5), used to draw the knobs in the app the same way.
+    /// Effects without a single colour (rainbow, waves…) and "off" use the app's blue.
+    func knobColor(_ i: Int) -> Color {
+        guard mode.usesColor else { return Color(hex: "#0A84FF") }
+        let hex = colorSource == .perItem && i < itemColors.count ? itemColors[i] : colorHex
+        return Color(hex: hex)
+    }
+}
+
 extension LEDSetting.Mode {
     /// Rainbow-type effects generate their own colors.
     var usesColor: Bool { ![.off, .wave, .colorCycle, .spectrum].contains(self) }
@@ -62,6 +72,8 @@ struct DeviceSettings: Codable, Hashable {
     var brightness = 80
     var powerSavingMinutes = 0 // 0 = off
     var touchEffect = true
+    /// Slide animation of the panel on the device when the page changes (a few frames).
+    var pageAnimation = true
     var systemSound = true
     var headphonesVolume = 85
     var lineOutVolume = 85
@@ -145,9 +157,37 @@ final class ProfileStore: ObservableObject {
         normalize()
     }
 
+    /// Tile colours of versions up to 0.0.7, per action family.
+    private static func legacyTileHex(for actionID: String) -> String {
+        switch actionID.split(separator: ".").first.map(String.init) ?? "" {
+        case "system": "#3D9BE9"
+        case "obs": "#5B5B66"
+        case "slobs": "#1E8C7E"
+        case "twitch": "#7C3AED"
+        case "youtube": "#C62828"
+        case "spotify": "#1E7F3C"
+        case "discord": "#4752C4"
+        case "voicemod": "#00897B"
+        case "pkg": "#2B2B2B"
+        default: "#352994"
+        }
+    }
+
     private static func recolorDefaultStates(_ k: KeyAssignment) -> KeyAssignment {
         var k = k
         k.children = k.children.map(recolorDefaultStates)
+        // Keys still in the old default colours get the new palette (custom colours are kept).
+        if !k.actionID.hasPrefix("pkg:") {
+            let new = Theme.tileHex(for: k.actionID)
+            for oldHex in [legacyTileHex(for: k.actionID), Theme.prefixHex(for: k.actionID)] {
+                let old = oldHex.uppercased(), oldLight = Theme.lighten(oldHex, 0.28).uppercased()
+                guard old != new.uppercased() else { continue }
+                for i in k.states.indices {
+                    let bg = k.states[i].background.uppercased()
+                    if bg == old { k.states[i].background = new } else if bg == oldLight { k.states[i].background = Theme.lighten(new, 0.28) }
+                }
+            }
+        }
         guard !k.actionID.hasPrefix("pkg:"), k.states.count > 1 else { return k }
         let base = Theme.tileHex(for: k.actionID)
         for i in k.states.indices where k.states[i].background.uppercased() == "#1E1E1E" {
@@ -169,6 +209,17 @@ final class ProfileStore: ObservableObject {
         if library.knobProfiles.isEmpty { library.knobProfiles = [KnobProfile(title: "Manopole predefinite")] }
         // Keys of the vendor Discord / Voicemod packages become the built-in integrations.
         for i in BuiltInMigration.run(&library) { UserDefaults.standard.set(true, forKey: i.defaultsKey) }
+        // Function keys are now fixed for the whole profile (page 0): keys set on other pages move there
+        // when that button is free on page 0, otherwise the page-0 key is used (the other one is kept, unused).
+        for p in library.hotkeyProfiles.indices {
+            var keys = library.hotkeyProfiles[p].keys
+            var taken = Set(keys.filter { $0.slot == .functionKey && $0.page == 0 }.map { $0.x + 2 * $0.y })
+            for i in keys.indices where keys[i].slot == .functionKey && keys[i].page != 0 && keys[i].page < PageID.groupBase {
+                let pos = keys[i].x + 2 * keys[i].y
+                if !taken.contains(pos) { keys[i].page = 0; taken.insert(pos) }
+            }
+            library.hotkeyProfiles[p].keys = keys
+        }
         // Older versions drew the first state of two-state keys in grey: use the action-list color.
         for p in library.hotkeyProfiles.indices {
             library.hotkeyProfiles[p].keys = library.hotkeyProfiles[p].keys.map(Self.recolorDefaultStates)

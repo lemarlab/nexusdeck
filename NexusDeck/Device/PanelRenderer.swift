@@ -7,31 +7,39 @@ struct PanelCanvas: View {
     @ObservedObject var store: ProfileStore
     var images: [UUID: NSImage] = [:]
     var touchedKey: UUID?
+    /// Page to draw (default: the current one) and whether to draw the background (the editor slides the keys over a fixed background).
+    var page: Int? = nil
+    var drawsBackground = true
 
     static let size = CGSize(width: AXProtocol.panelWidth, height: AXProtocol.panelHeight)
     static let cellW: CGFloat = size.width / 5
     static let cellH: CGFloat = size.height / 4
-    static let inset: CGFloat = 3.5
+    static let inset: CGFloat = 5
+    static let radius: CGFloat = 14
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            background
-            if deck.panelOn && !store.library.device.autoHideGrid {
+            if drawsBackground { background } else { Color.clear.frame(width: Self.size.width, height: Self.size.height) }
+            if drawsBackground && deck.panelOn && !store.library.device.autoHideGrid {
                 ForEach(0..<20, id: \.self) { i in
-                    Rectangle()
-                        .fill(Color.black.opacity(0.45 * store.library.device.panelOpacity))
-                        .overlay(Rectangle().strokeBorder(Color.white.opacity(0.08 * store.library.device.panelOpacity)))
+                    // Empty place: a soft glassy tile (no dashed border).
+                    RoundedRectangle(cornerRadius: Self.radius)
+                        .fill(LinearGradient(colors: [Color.white.opacity(0.07 * store.library.device.panelOpacity),
+                                                      Color.white.opacity(0.03 * store.library.device.panelOpacity)],
+                                             startPoint: .top, endPoint: .bottom))
+                        .overlay(RoundedRectangle(cornerRadius: Self.radius).strokeBorder(Color.white.opacity(0.06 * store.library.device.panelOpacity), lineWidth: 1))
                         .frame(width: Self.cellW - 2 * Self.inset, height: Self.cellH - 2 * Self.inset)
                         .offset(x: CGFloat(i % 5) * Self.cellW + Self.inset, y: CGFloat(i / 5) * Self.cellH + Self.inset)
                 }
             }
             if deck.panelOn {
-                ForEach(deck.keys(onPage: deck.currentPage)) { k in
+                ForEach(deck.keys(onPage: page ?? deck.currentPage)) { k in
                     face(k)
                         .frame(width: CGFloat(k.w) * Self.cellW - 2 * Self.inset, height: CGFloat(k.h) * Self.cellH - 2 * Self.inset)
-                        .clipShape(RoundedRectangle(cornerRadius: 1.5))
+                        .clipShape(RoundedRectangle(cornerRadius: Self.radius))
                         .scaleEffect(touchedKey == k.id && store.library.device.touchEffect ? 0.92 : 1)
                         .offset(x: CGFloat(k.x) * Self.cellW + Self.inset, y: CGFloat(k.y) * Self.cellH + Self.inset)
+                        .transition(.scale(scale: 0.8, anchor: .center).combined(with: .opacity))
                 }
             }
         }
@@ -81,8 +89,37 @@ struct PanelCanvas: View {
     }
 }
 
+/// Panel image in the middle of a page change: the old page slides out while the new one slides in.
+struct PanelTransitionCanvas: View {
+    @ObservedObject var deck: DeckController
+    @ObservedObject var store: ProfileStore
+    var images: [UUID: NSImage]
+    let from: Int, to: Int, forward: Bool
+    /// 0 … 1
+    let progress: CGFloat
+
+    var body: some View {
+        let w = PanelCanvas.size.width, d: CGFloat = forward ? 1 : -1
+        ZStack(alignment: .topLeading) {
+            PanelCanvas(deck: deck, store: store, images: images, page: -1)
+            PanelCanvas(deck: deck, store: store, images: images, page: from, drawsBackground: false).offset(x: -d * progress * w)
+            PanelCanvas(deck: deck, store: store, images: images, page: to, drawsBackground: false).offset(x: d * (1 - progress) * w)
+        }
+        .frame(width: PanelCanvas.size.width, height: PanelCanvas.size.height)
+        .clipped()
+    }
+}
+
 @MainActor
 enum PanelRenderer {
+    static func transitionJPEG(deck: DeckController, store: ProfileStore, images: [UUID: NSImage], from: Int, to: Int,
+                               forward: Bool, progress: CGFloat, quality: CGFloat) -> Data? {
+        let r = ImageRenderer(content: PanelTransitionCanvas(deck: deck, store: store, images: images, from: from, to: to, forward: forward, progress: progress))
+        r.scale = 1
+        guard let cg = r.cgImage else { return nil }
+        return NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: quality])
+    }
+
     static func jpeg(deck: DeckController, store: ProfileStore, images: [UUID: NSImage], touched: UUID?, quality: CGFloat = 0.8) -> Data? {
         let r = ImageRenderer(content: PanelCanvas(deck: deck, store: store, images: images, touchedKey: touched))
         r.scale = 1

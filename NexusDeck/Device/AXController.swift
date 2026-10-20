@@ -7,7 +7,8 @@ final class AXController {
     private let commandQueue = DispatchQueue(label: "nexusdeck.commands", qos: .userInitiated)
     private let renderQueue = DispatchQueue(label: "nexusdeck.render", qos: .userInitiated)
     private var lastCommandEnd = Date.distantPast
-    private var pendingFrame: Data?
+    /// Frames waiting to be sent, in order (a page animation queues several; a normal redraw replaces them).
+    private var pendingFrames: [Data] = []
     private var rendering = false
     private let ack = DispatchSemaphore(value: 0)
     private let lock = NSLock()
@@ -73,8 +74,11 @@ final class AXController {
     func send(_ cmds: [AXProtocol.Command]) { cmds.forEach(send) }
 
     /// Waits until the queued commands and `cmd` have been written (used when quitting).
-    func sendAndWait(_ cmd: AXProtocol.Command) {
-        commandQueue.sync { _ = self.perform(cmd) }
+    /// Sends and waits (at most `timeout` seconds: used when quitting, it must never block the app).
+    func sendAndWait(_ cmd: AXProtocol.Command, timeout: TimeInterval = 1) {
+        let done = DispatchSemaphore(value: 0)
+        commandQueue.async { _ = self.perform(cmd); done.signal() }
+        _ = done.wait(timeout: .now() + timeout)
     }
 
     /// Last mute masks written: a volume write unmutes the channel on the device, so they are re-sent after it.
@@ -106,19 +110,43 @@ final class AXController {
     /// Queues the newest panel frame (older pending frames are dropped).
     func push(jpeg: Data) {
         guard jpeg.count <= AXProtocol.maxFrameBytes else { return }
+        enqueue { $0 = [jpeg] }
+    }
+
+    /// Adds a frame after the ones already waiting (animation frames).
+    func append(jpeg: Data) {
+        guard jpeg.count <= AXProtocol.maxFrameBytes else { return }
+        enqueue { $0.append(jpeg) }
+    }
+
+    private func enqueue(_ change: (inout [Data]) -> Void) {
         lock.lock()
-        pendingFrame = jpeg
+        change(&pendingFrames)
         let start = !rendering
         rendering = true
         lock.unlock()
         if start { renderQueue.async { self.renderLoop() } }
     }
 
+    /// Sends frames right away on the calling thread (used when quitting, when no run loop is left).
+    func pushNow(_ frames: [Data], interval: TimeInterval = 0.07) {
+        lock.lock(); pendingFrames.removeAll(); lock.unlock()
+        renderQueue.sync {
+            for f in frames {
+                let start = Date()
+                for chunk in AXProtocol.frameChunks(f) where hid.setOutput(chunk) != kIOReturnSuccess { break }
+                _ = ack.wait(timeout: .now() + .milliseconds(60))
+                let left = interval - Date().timeIntervalSince(start)
+                if left > 0 { Thread.sleep(forTimeInterval: left) }
+            }
+        }
+    }
+
     private func renderLoop() {
         while true {
             lock.lock()
-            guard let frame = pendingFrame else { rendering = false; lock.unlock(); return }
-            pendingFrame = nil
+            guard !pendingFrames.isEmpty else { rendering = false; lock.unlock(); return }
+            let frame = pendingFrames.removeFirst()
             lock.unlock()
 
             let start = Date()

@@ -32,72 +32,113 @@ extension ActionDescriptor {
 
 struct ActionListColumn: View {
     @State private var collapsed: Set<String> = []
+    @State private var search = ""
     @ObservedObject private var packages = PackageManager.shared
     // Re-render when built-in integrations are switched on or off.
     @AppStorage(BuiltInIntegration.discord.defaultsKey) private var discordOn = false
     @AppStorage(BuiltInIntegration.voicemod.defaultsKey) private var voicemodOn = false
 
+    private let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Tasti e widget").font(.system(size: 14, weight: .bold))
-                .padding(.leading, 12).frame(height: 38, alignment: .leading)
-            Rectangle().fill(Theme.separator.opacity(0.5)).frame(height: 1)
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").font(.system(size: 12)).foregroundStyle(Theme.textFaint)
+                TextField("Cerca azioni e widget", text: $search).textFieldStyle(.plain).font(.system(size: 12.5))
+                if !search.isEmpty {
+                    Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textFaint) }.buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10).frame(height: 30)
+            .background(Theme.field).clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding(12)
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
                     ForEach(ActionCatalog.allCategories) { cat in
-                        Button {
-                            if collapsed.contains(cat.id) { collapsed.remove(cat.id) } else { collapsed.insert(cat.id) }
-                        } label: {
-                            HStack(spacing: 16) {
-                                Text(collapsed.contains(cat.id) ? "+" : "—").font(.system(size: 12, weight: .bold)).frame(width: 12)
-                                Text(cat.title).font(.system(size: 12, weight: .bold))
-                                Spacer()
+                        let items = cat.actions.filter { search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) || cat.title.localizedCaseInsensitiveContains(search) }
+                        if !items.isEmpty {
+                            Button {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    if collapsed.contains(cat.id) { collapsed.remove(cat.id) } else { collapsed.insert(cat.id) }
+                                }
+                            } label: {
+                                HStack {
+                                    Text(cat.title.uppercased()).font(.system(size: 11, weight: .semibold)).tracking(0.5)
+                                    Spacer()
+                                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                                        .rotationEffect(.degrees(collapsed.contains(cat.id) && search.isEmpty ? -90 : 0))
+                                }
+                                .foregroundStyle(Theme.textFaint)
+                                .padding(.horizontal, 4).frame(height: 26)
+                                .contentShape(Rectangle())
                             }
-                            .foregroundStyle(Theme.textMid)
-                            .padding(.horizontal, 10).frame(height: 34)
-                            .background(Theme.columnHeader)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 8).padding(.top, 12).padding(.bottom, 4)
-                        if !collapsed.contains(cat.id) {
-                            ForEach(cat.actions) { ActionRow(descriptor: $0) }
+                            .buttonStyle(.plain)
+                            .padding(.top, 6)
+                            if !collapsed.contains(cat.id) || !search.isEmpty {
+                                LazyVGrid(columns: columns, spacing: 8) {
+                                    ForEach(items) { ActionRow(descriptor: $0) }
+                                }
+                            }
                         }
                     }
                 }
-                .padding(.bottom, 12)
+                .padding(.horizontal, 12).padding(.bottom, 16)
             }
-            .scrollIndicators(.visible)
+            .scrollIndicators(.automatic)
         }
     }
 }
 
+/// Library card: rounded icon and name; drag it onto the panel, a function key or a knob.
 struct ActionRow: View {
     let descriptor: ActionDescriptor
     @EnvironmentObject var editor: DeckEditorModel
     @State private var hover = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 18) {
-            ActionTile(descriptor: descriptor)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(descriptor.title).font(.system(size: 12.5)).foregroundStyle(Theme.textMid)
-                Text(descriptor.kind == .knob ? "manopola" : "\(descriptor.width) x \(descriptor.height)")
-                    .font(.system(size: 10.5)).foregroundStyle(Theme.textMid)
+        VStack(alignment: .leading, spacing: 7) {
+            ActionIcon(descriptor: descriptor, size: 28)
+            Text(descriptor.title).font(.system(size: 11.5)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            if descriptor.kind == .knob || descriptor.width > 1 || descriptor.height > 1 {
+                Text(descriptor.kind == .knob ? "Manopola" : "\(descriptor.width) × \(descriptor.height)")
+                    .font(.system(size: 10)).foregroundStyle(Theme.textFaint)
             }
-            .padding(.top, 2)
-            Spacer()
         }
-        .padding(.leading, 28).frame(height: 52)
-        .background(hover ? Color.white.opacity(0.04) : .clear)
-        .onHover { hover = $0 }
+        .padding(9)
+        .frame(maxWidth: .infinity, minHeight: 74, alignment: .topLeading)
+        .background(Theme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.cardBorder, lineWidth: 1))
+        .shadow(color: .black.opacity(0.04), radius: 1.5, y: 1)
+        .help(descriptor.title)
         .onDrag {
             let d = descriptor
             editor.dragInfo = .init(w: d.kind == .knob ? 1 : d.width, h: d.kind == .knob ? 1 : d.height, ignoring: nil)
             return NSItemProvider(object: d.id as NSString)
         } preview: {
-            ActionTile(descriptor: descriptor, width: 75 * CGFloat(descriptor.width), height: 54 * CGFloat(descriptor.height))
-                .overlay(Rectangle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
+            // Exactly the key that will land on the panel.
+            KeyDragPreview(key: KeyAssignment(actionID: descriptor.id, w: descriptor.kind == .knob ? 1 : descriptor.width,
+                                              h: descriptor.kind == .knob ? 1 : descriptor.height,
+                                              states: ActionCatalog.defaultStates(for: descriptor)))
         }
+    }
+}
+
+/// Rounded square icon of an action, in its family colour.
+struct ActionIcon: View {
+    let descriptor: ActionDescriptor
+    var size: CGFloat = 28
+    var body: some View {
+        Group {
+            if let f = descriptor.iconFile, let img = NSImage(contentsOfFile: f) {
+                Image(nsImage: img).resizable().scaledToFit().background(Color.black)
+            } else {
+                let hex = Theme.tileHex(for: descriptor.id)
+                LinearGradient(colors: [Color(hex: Theme.lighten(hex, 0.15)), Color(hex: hex)], startPoint: .top, endPoint: .bottom)
+                    .overlay(Image(systemName: descriptor.symbol).font(.system(size: size * 0.5, weight: .medium)).foregroundStyle(.white))
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.25))
     }
 }

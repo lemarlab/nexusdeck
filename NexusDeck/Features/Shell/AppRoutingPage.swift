@@ -8,19 +8,16 @@ struct AppRoutingPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Instradamento app").font(.system(size: 14, weight: .bold))
-                Spacer()
+            HStack(alignment: .top) {
+                Text("Scegli su quale canale del mixer suona ogni app. Il volume lo regola la manopola di quel canale. \"Predefinito\" lascia l'app sulla sua uscita normale.")
+                    .font(.system(size: 12.5)).foregroundStyle(Theme.textDim).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 20)
                 Button { router.refresh() } label: {
-                    Image(systemName: "arrow.clockwise").font(.system(size: 13)).foregroundStyle(Theme.textDim)
+                    Label("Aggiorna", systemImage: "arrow.clockwise").font(.system(size: 12))
                 }
-                .buttonStyle(.plain).help("Aggiorna elenco")
+                .buttonStyle(.plain).foregroundStyle(Theme.accent).help("Aggiorna elenco")
             }
-            .padding(.horizontal, 24).frame(height: 38)
-            Rectangle().fill(Theme.separator.opacity(0.5)).frame(height: 1)
-            Text("Scegli su quale canale del mixer suona ogni app. Il volume lo regola la manopola di quel canale. \"Predefinito\" lascia l'app sulla sua uscita normale.")
-                .font(.system(size: 12)).foregroundStyle(Theme.textDim)
-                .padding(.horizontal, 24).padding(.vertical, 12)
+            .padding(.horizontal, 28).padding(.top, 24).padding(.bottom, 14)
             if let e = router.lastError {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
@@ -33,16 +30,19 @@ struct AppRoutingPage: View {
             }
             ScrollView {
                 VStack(spacing: 0) {
-                    ForEach(rows) { app in
-                        row(app)
-                        Rectangle().fill(Theme.separator.opacity(0.35)).frame(height: 1)
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { i, app in
+                        if i > 0 { Rectangle().fill(Theme.cardBorder).frame(height: 1).padding(.leading, 60) }
+                        row(app).padding(.horizontal, 14)
                     }
                     if rows.isEmpty {
                         Text("Nessuna app sta usando l'audio. Avvia la riproduzione in un'app e comparirà qui.")
                             .font(.system(size: 12)).foregroundStyle(Theme.textDim).padding(30)
                     }
                 }
-                .padding(.horizontal, 24)
+                .background(Theme.card)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.cardBorder, lineWidth: 1))
+                .padding(.horizontal, 28).padding(.bottom, 28)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

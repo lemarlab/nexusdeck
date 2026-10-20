@@ -77,7 +77,8 @@ struct ActionSettingsView: View {
     @EnvironmentObject var editor: DeckEditorModel
 
     var body: some View {
-        Form {
+        // Narrow inspector: one column, labels above their controls.
+        VStack(alignment: .leading, spacing: 10) {
             let layouts = ActionCatalog.descriptor(key.actionID).layouts
             if layouts.count > 1 && key.slot == .touch && key.actionID != ActionID.webView {
                 DropdownRowField(title: "Layout", selection: Binding(get: { "\(key.w)x\(key.h)" }, set: { v in
@@ -90,7 +91,9 @@ struct ActionSettingsView: View {
                 MultiActionEditor(children: $key.children)
             }
         }
-        .formStyle(.columns)
+        .labeledContentStyle(StackedLabeledContent())
+        .textFieldStyle(.roundedBorder)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .font(.system(size: 12))
         .foregroundStyle(Theme.textMid)
     }
@@ -349,6 +352,16 @@ struct MultiActionEditor: View {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Label above the control, full width (inspector forms).
+struct StackedLabeledContent: LabeledContentStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            configuration.label.font(.system(size: 11.5, weight: .medium)).foregroundStyle(Theme.textDim)
+            configuration.content.frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

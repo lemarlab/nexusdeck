@@ -18,6 +18,11 @@ final class Updater: ObservableObject {
     static var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0" }
 
     var latestVersion: String? { if case .available(let v) = state { return v }; return nil }
+    /// Version being downloaded / installed.
+    @Published private(set) var installingVersion: String?
+    var isBusy: Bool { state == .downloading || state == .installing || state == .checking }
+    /// Shows the update window over the main window (automatic checks, header badge).
+    @Published var showSheet = false
 
     /// How often NexusDeck looks for updates on its own.
     enum Frequency: Int, CaseIterable, Identifiable {
@@ -51,7 +56,7 @@ final class Updater: ObservableObject {
 
     /// Automatic checks: at launch, then (while the app stays open) whenever the chosen interval has passed.
     func startAutomaticChecks() {
-        if frequency == .launch { Task { await check() } } else { checkIfDue() }
+        if frequency == .launch { Task { await check(automatic: true) } } else { checkIfDue() }
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.checkIfDue() }
@@ -62,10 +67,10 @@ final class Updater: ObservableObject {
         guard let interval = frequency.interval else { return }
         let last = UserDefaults.standard.double(forKey: lastCheckKey)
         guard Date().timeIntervalSince1970 - last >= interval else { return }
-        Task { await check() }
+        Task { await check(automatic: true) }
     }
 
-    func check() async {
+    func check(automatic: Bool = false) async {
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastCheckKey)
         state = .checking
         do {
@@ -92,6 +97,11 @@ final class Updater: ObservableObject {
             let version = best.version
             notes = json["body"] as? String ?? ""
             state = Self.isNewer(version, than: Self.currentVersion) && dmgURL != nil ? .available(version) : .upToDate
+            // Automatic check: open the update window once per new version.
+            if automatic, case .available(let v) = state, UserDefaults.standard.string(forKey: "updater.shownVersion") != v {
+                UserDefaults.standard.set(v, forKey: "updater.shownVersion")
+                showSheet = true
+            }
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -109,6 +119,7 @@ final class Updater: ObservableObject {
     /// Downloads the DMG, replaces the running app with the one inside and relaunches.
     func install() async {
         guard let dmgURL else { return }
+        installingVersion = latestVersion
         state = .downloading
         do {
             let (tmp, resp) = try await URLSession.shared.download(from: dmgURL)
@@ -154,11 +165,16 @@ final class Updater: ObservableObject {
         _ = try FileManager.default.replaceItemAt(old, withItemAt: staged)
     }
 
+    /// Quits and reopens the (new) app: a helper shell waits for this process to end, then opens it.
     private func relaunch(_ appPath: String) {
+        let pid = ProcessInfo.processInfo.processIdentifier
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", "sleep 1.5; /usr/bin/open \"\(appPath)\""]
+        p.arguments = ["-c", "while /bin/kill -0 \(pid) 2>/dev/null; do sleep 0.2; done; sleep 0.5; /usr/bin/open \"\(appPath)\""]
         try? p.run()
-        NSApp.terminate(nil)
+        // Close sheets first (a sheet can delay the quit), then quit; force the exit if something hangs.
+        for w in NSApp.windows { if let s = w.attachedSheet { w.endSheet(s) } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 10) { exit(0) }
+        DispatchQueue.main.async { NSApp.terminate(nil) }
     }
 }

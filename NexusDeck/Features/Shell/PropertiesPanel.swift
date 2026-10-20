@@ -10,8 +10,6 @@ struct PropertiesPanel: View {
         VStack(spacing: 0) {
             content
         }
-        .background(Theme.panel)
-        .overlay(alignment: .top) { Rectangle().fill(Color.black).frame(height: 1) }
     }
 
     @ViewBuilder private var content: some View {
@@ -23,10 +21,11 @@ struct PropertiesPanel: View {
                 KnobInspector(index: k).padding(.horizontal, 8)
                 Spacer(minLength: 0)
             } else {
-                PanelHeader(title: "Tasti e widget")
                 Spacer()
-                Text("Trascina un tasto o un widget e rilascialo\nsu uno slot libero dello schermo illustrato.")
-                    .font(.system(size: 12.5, weight: .bold)).foregroundStyle(Theme.textDim).multilineTextAlignment(.center)
+                Image(systemName: "square.grid.3x3").font(.system(size: 28)).foregroundStyle(Theme.textFaint)
+                Text("Nessun tasto selezionato").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.textDim).padding(.top, 6)
+                Text("Trascina un'azione dalla libreria su uno spazio libero, oppure clicca un tasto o una manopola per modificarlo.")
+                    .font(.system(size: 12)).foregroundStyle(Theme.textFaint).multilineTextAlignment(.center).padding(.horizontal, 30).padding(.top, 2)
                 Spacer()
             }
         } else {
@@ -47,12 +46,11 @@ struct PanelHeader: View {
     var trailing: AnyView? = nil
     var body: some View {
         HStack {
-            Text(title).font(.system(size: 13, weight: .bold)).foregroundStyle(Theme.textMid)
+            Text(title).font(.system(size: 13.5, weight: .semibold)).lineLimit(2)
             Spacer()
             trailing
         }
-        .padding(.horizontal, 10).frame(height: 34)
-        .background(Theme.panelHeader)
+        .padding(.horizontal, 16).frame(minHeight: 46)
     }
 }
 
@@ -74,13 +72,18 @@ struct KeyProperties: View {
                     Button { editor.delete(key.id) } label: { Image(systemName: "trash") }.help("Elimina")
                 }
                 .font(.system(size: 12)).buttonStyle(.plain).foregroundStyle(Theme.textDim)))
+            // Wide panel under the device: preview on the left, settings on the right.
             HStack(alignment: .top, spacing: 0) {
                 previewCard(d)
+                    .frame(width: 230)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.cardBorder, lineWidth: 1))
+                    .padding(.leading, 16).padding(.top, 2)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
                         if d.kind != .widget, key.states.indices.contains(stateIndex) {
                             FieldLabel("Titolo")
-                            TextField("", text: $key.states[stateIndex].title).darkField().font(.system(size: 12.5, weight: .bold)).frame(width: 345)
+                            TextField("", text: $key.states[stateIndex].title).darkField().font(.system(size: 12.5, weight: .bold)).frame(maxWidth: .infinity)
                         }
                         if let (p, w) = PackageManager.shared.widget(key.actionID) {
                             if let path = w.propertyViewPath {
@@ -93,10 +96,11 @@ struct KeyProperties: View {
                         } else {
                             ActionSettingsView(key: $key)
                                 .scrollContentBackground(.hidden)
-                                .frame(maxWidth: 460, alignment: .leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    .padding(.horizontal, 16).padding(.vertical, 14)
+                    .padding(.horizontal, 20).padding(.top, 2).padding(.bottom, 14)
+                    .frame(maxWidth: 560, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
@@ -110,7 +114,7 @@ struct KeyProperties: View {
                 Spacer()
                 if d.kind != .widget {
                     Button { showTextEdit.toggle() } label: { Image(systemName: "textformat").font(.system(size: 14, weight: .bold)) }
-                        .buttonStyle(.plain).foregroundStyle(Theme.textDim)
+                        .buttonStyle(.plain).foregroundStyle(Color.white.opacity(0.7))
                         .popover(isPresented: $showTextEdit, arrowEdge: .bottom) { TextEditPopover(style: $key.style) }
                     ImageMenu(state: $key.states[min(stateIndex, key.states.count - 1)])
                 }
@@ -125,12 +129,13 @@ struct KeyProperties: View {
                 }
             }
             .frame(width: 75 * CGFloat(min(key.w, 2)), height: 54 * CGFloat(min(key.h, 2)))
-            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .shadow(color: .black.opacity(0.4), radius: 5, y: 2)
             Spacer()
             if key.states.count > 1 {
                 HStack(spacing: 5) {
                     ForEach(key.states.indices, id: \.self) { i in
-                        Capsule().fill(i == stateIndex ? Theme.accent : Color(hex: "#3C3C3C")).frame(width: 26, height: 4)
+                        Capsule().fill(i == stateIndex ? Theme.accent : Color.white.opacity(0.2)).frame(width: 26, height: 4)
                             .contentShape(Rectangle().inset(by: -6))
                             .onTapGesture { stateIndex = i }
                     }
@@ -138,9 +143,9 @@ struct KeyProperties: View {
                 .padding(.bottom, 12)
             }
         }
-        .frame(width: 240)
-        .frame(maxHeight: .infinity)
-        .background(Theme.preview)
+        .frame(maxWidth: .infinity)
+        .frame(height: 170)
+        .background(Color(hex: "#141416"))
     }
 
     private func categoryTitle(_ d: ActionDescriptor) -> String {

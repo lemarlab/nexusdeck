@@ -209,7 +209,8 @@ struct WidgetOrKeyView: View {
         case ActionID.mixerDashboard:
             // "Sync" (default) follows the mix the knobs control; otherwise the fixed mix chosen in the settings.
             MixerDashboardFace(mixer: store.mixer, bus: key.settings.bool("sync", true) ? store.mixer.activeMix : (MixBus(rawValue: key.settings.int("mix")) ?? .creator),
-                               inputIndicator: key.settings.bool("input", true))
+                               inputIndicator: key.settings.bool("input", true),
+                               knobColors: (0..<6).map { store.library.device.ledKnob.knobColor($0) })
         case ActionID.pageIndicator:
             PageIndicatorFace(page: deck.currentPage, count: store.hotkey.pageCount, inFolder: deck.isInFolder)
         default:
@@ -247,81 +248,84 @@ struct MixerDashboardFace: View {
     let mixer: MixerProfile
     let bus: MixBus
     var inputIndicator = true
+    /// Ring colours of the six knobs (same as the device LEDs).
+    var knobColors: [Color] = Array(repeating: Color(hex: "#0A84FF"), count: 6)
     @ObservedObject private var meters = LevelMeters.shared
 
     var body: some View {
         GeometryReader { g in
-            let u = g.size.width / 800 * 1.0 // panel units (dashboard is 800 wide on the panel)
+            let u = g.size.width / 800 // panel units (the dashboard is 800 wide on the panel)
             let mix = mixer.mixes[mixer.dualMix ? bus : .creator] ?? MixState()
-            HStack(spacing: 0) {
-                // Left: master / creator / audience
-                ZStack(alignment: .trailing) {
-                    LinearGradient(colors: [Color(hex: "#1D2C38"), Color(hex: "#0B0F12")], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    Rectangle().fill(Color(hex: "#C77A00")).frame(width: 2 * u)
-                    VStack(spacing: 14 * u) {
-                        if mixer.dualMix {
-                            busCircle("CREATOR", "person.wave.2.fill", active: bus == .creator, u: u)
-                            busCircle("AUDIENCE", "speaker.wave.2.circle", active: bus == .audience, u: u)
-                        } else {
-                            busCircle("MASTER", "person.wave.2.fill", active: true, u: u)
-                        }
+            HStack(spacing: 14 * u) {
+                // Left: the mix the knobs drive.
+                VStack(spacing: 18 * u) {
+                    if mixer.dualMix {
+                        busTile("CREATOR", "person.wave.2.fill", active: bus == .creator, u: u)
+                        busTile("AUDIENCE", "dot.radiowaves.left.and.right", active: bus == .audience, u: u)
+                    } else {
+                        busTile("MASTER", "slider.vertical.3", active: true, u: u)
                     }
-                    .frame(maxWidth: .infinity)
-                    VStack(spacing: 4 * u) {
-                        tag("OUT", u: u).offset(x: -2 * u)
-                        tag("IN", u: u).offset(x: 34 * u)
-                    }
-                    .offset(x: 2 * u)
                 }
-                .frame(width: 252 * u)
-                // Right: six channels
-                VStack(spacing: 22 * u) {
+                .frame(width: 190 * u)
+                .frame(maxHeight: .infinity)
+                .background(RoundedRectangle(cornerRadius: 18 * u).fill(Color(hex: "#5B8CFF").opacity(0.08)))
+                // Right: six channels, drawn like the knobs of the device.
+                VStack(spacing: 16 * u) {
                     HStack(spacing: 0) { ForEach(MixerChannel.allCases.prefix(3)) { ch in channel(ch, mix, u) } }
                     HStack(spacing: 0) { ForEach(MixerChannel.allCases.suffix(3)) { ch in channel(ch, mix, u) } }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black)
             }
+            .padding(14 * u)
+            // Midnight blue background.
+            .background(LinearGradient(colors: [Color(hex: "#1B2A4A"), Color(hex: "#0B1426")], startPoint: .top, endPoint: .bottom))
         }
     }
 
-    private func busCircle(_ title: String, _ symbol: String, active: Bool, u: CGFloat) -> some View {
-        VStack(spacing: 8 * u) {
-            ZStack {
-                Circle().fill(Color(hex: "#232323"))
-                Circle().strokeBorder(active ? Color(hex: "#FF9900") : Color(hex: "#2E2E2E"), lineWidth: 4 * u)
-                Image(systemName: symbol).font(.system(size: 34 * u, weight: .medium)).foregroundStyle(active ? .white : Color(hex: "#9A9A9A"))
-            }
-            .frame(width: (mixer.dualMix ? 100 : 112) * u, height: (mixer.dualMix ? 100 : 112) * u)
-            Text(title).font(.system(size: 20 * u, weight: .medium)).foregroundStyle(.white)
+    private func busTile(_ title: String, _ symbol: String, active: Bool, u: CGFloat) -> some View {
+        let size: CGFloat = (mixer.dualMix ? 92 : 112) * u
+        return VStack(spacing: 10 * u) {
+            RoundedRectangle(cornerRadius: size * 0.27)
+                .fill(active ? AnyShapeStyle(LinearGradient(colors: [Color(hex: "#FFB340"), Color(hex: "#FF7A00")], startPoint: .top, endPoint: .bottom))
+                             : AnyShapeStyle(Color.white.opacity(0.08)))
+                .frame(width: size, height: size)
+                .overlay(Image(systemName: symbol).font(.system(size: size * 0.42, weight: .medium)).foregroundStyle(active ? .white : Color.white.opacity(0.45)))
+                .shadow(color: active ? Color(hex: "#FF7A00").opacity(0.45) : .clear, radius: 10 * u, y: 4 * u)
+            Text(title).font(.system(size: 17 * u, weight: .semibold)).tracking(1.5 * u)
+                .foregroundStyle(active ? .white : Color.white.opacity(0.45))
         }
-    }
-
-    private func tag(_ t: String, u: CGFloat) -> some View {
-        Text(t).font(.system(size: 15 * u, weight: .heavy, design: .monospaced)).foregroundStyle(.black)
-            .padding(.horizontal, 4 * u).padding(.vertical, 1 * u)
-            .background(Color(hex: "#FFB300"))
     }
 
     private func channel(_ ch: MixerChannel, _ mix: MixState, _ u: CGFloat) -> some View {
         let s = mix.channels[ch] ?? ChannelState()
-        return VStack(spacing: 14 * u) {
+        let ring: Color = s.muted ? Color(hex: "#FF453A") : knobColors[MixerChannel.allCases.firstIndex(of: ch) ?? 0]
+        return VStack(spacing: 10 * u) {
             ZStack {
-                Circle().fill(RadialGradient(colors: [Color(hex: "#4A4A4A"), Color(hex: "#2A2A2A")], center: .top, startRadius: 1, endRadius: 50 * u))
-                // Volume ring, plus the live input level when the input indicator is on.
-                Circle().trim(from: 0, to: CGFloat(s.level) / 100)
-                    .stroke(Color(hex: "#FF9900").opacity(0.55), style: StrokeStyle(lineWidth: 4 * u, lineCap: .round))
-                    .rotationEffect(.degrees(-90)).padding(-7 * u)
+                // Volume: 270° arc like the device knobs (red when muted).
+                Circle().trim(from: 0, to: 0.75)
+                    .stroke(Color.white.opacity(0.1), style: StrokeStyle(lineWidth: 8 * u, lineCap: .round))
+                    .rotationEffect(.degrees(135))
+                Circle().trim(from: 0, to: 0.75 * CGFloat(s.level) / 100)
+                    .stroke(ring, style: StrokeStyle(lineWidth: 8 * u, lineCap: .round))
+                    .rotationEffect(.degrees(135))
+                    .shadow(color: ring.opacity(0.6), radius: 4 * u)
+                // Live input level, inside the volume arc.
                 if inputIndicator {
                     let lvl = CGFloat(meters.values[mixer.dualMix ? bus : .creator]?[ch] ?? 0) / 100
-                    Circle().trim(from: 0, to: s.muted ? 0 : lvl)
-                        .stroke(Color(hex: "#18C93A"), style: StrokeStyle(lineWidth: 4 * u, lineCap: .round))
-                        .rotationEffect(.degrees(-90)).padding(-13 * u)
+                    Circle().trim(from: 0, to: 0.75 * (s.muted ? 0 : lvl))
+                        .stroke(Color(hex: "#30D158"), style: StrokeStyle(lineWidth: 3 * u, lineCap: .round))
+                        .rotationEffect(.degrees(135)).padding(11 * u)
                 }
-                Text("\(s.level)").font(.system(size: 30 * u, weight: .bold)).foregroundStyle(s.muted ? Color.red : .white)
+                Circle()
+                    .fill(RadialGradient(colors: [Color(hex: "#434347"), Color(hex: "#1D1D20")], center: .top, startRadius: 1, endRadius: 40 * u))
+                    .padding(17 * u)
+                    .shadow(color: .black.opacity(0.6), radius: 3 * u, y: 2 * u)
+                Text("\(s.level)").font(.system(size: 24 * u, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(s.muted ? Color(hex: "#FF453A") : .white)
             }
-            .frame(width: 82 * u, height: 82 * u)
-            Text(ch.title).font(.system(size: 20 * u, weight: .medium)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
+            .frame(width: 92 * u, height: 92 * u)
+            Text(mixer.name(ch).uppercased()).font(.system(size: 14 * u, weight: .semibold)).tracking(1.2 * u)
+                .foregroundStyle(Color.white.opacity(0.75)).lineLimit(1).minimumScaleFactor(0.6)
         }
         .frame(maxWidth: .infinity)
     }

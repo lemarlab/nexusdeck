@@ -84,6 +84,49 @@ final class AppAudioRouter: ObservableObject {
         sendVisibility()
     }
 
+    /// Quit: the NexusDeck devices disappear from the Mac (they do not work without the app), so apps fall back
+    /// to another output. The output in use is remembered and selected again at the next start.
+    func hideAllDevices() {
+        let def = Self.defaultOutputUID()
+        if def.hasPrefix("NexusDeck.") { UserDefaults.standard.set(def, forKey: "audio.lastDefaultOutput") }
+        wantedMask = 0
+        sentMask = nil
+        sendVisibility()
+    }
+
+    /// Start: once the devices are back, the output that was in use when NexusDeck quit is selected again.
+    func restoreDefaultOutput() {
+        guard let uid = UserDefaults.standard.string(forKey: "audio.lastDefaultOutput") else { return }
+        UserDefaults.standard.removeObject(forKey: "audio.lastDefaultOutput")
+        for delay in [0.5, 1.5, 3.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard Self.defaultOutputUID() != uid else { return }
+                var addr = Self.address(kAudioHardwarePropertyTranslateUIDToDevice)
+                var cf = uid as CFString
+                var id = AudioObjectID(0)
+                var size = UInt32(MemoryLayout<AudioObjectID>.size)
+                AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, UInt32(MemoryLayout<CFString>.size), &cf, &size, &id)
+                guard id != 0 else { return }
+                for sel in [kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDefaultSystemOutputDevice] {
+                    var a = Self.address(sel)
+                    AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, UInt32(MemoryLayout<AudioObjectID>.size), &id)
+                }
+            }
+        }
+    }
+
+    private static func defaultOutputUID() -> String {
+        var addr = address(kAudioHardwarePropertyDefaultOutputDevice)
+        var id = AudioObjectID(0)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &id)
+        var uaddr = address(kAudioDevicePropertyDeviceUID)
+        var s: Unmanaged<CFString>?
+        var ssize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(id, &uaddr, 0, nil, &ssize, &s) == noErr, let str = s else { return "" }
+        return str.takeRetainedValue() as String
+    }
+
     private func sendVisibility() {
         guard sentMask != wantedMask else { return }
         let plugIn = Self.plugInObject()

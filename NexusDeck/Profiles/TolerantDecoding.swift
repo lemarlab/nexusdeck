@@ -45,6 +45,7 @@ extension DeviceSettings {
         brightness = c.v("brightness", def.brightness)
         powerSavingMinutes = c.v("powerSavingMinutes", def.powerSavingMinutes)
         touchEffect = c.v("touchEffect", def.touchEffect)
+        pageAnimation = c.v("pageAnimation", def.pageAnimation)
         systemSound = c.v("systemSound", def.systemSound)
         headphonesVolume = c.v("headphonesVolume", def.headphonesVolume)
         lineOutVolume = c.v("lineOutVolume", def.lineOutVolume)

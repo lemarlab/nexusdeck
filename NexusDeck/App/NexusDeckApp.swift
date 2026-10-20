@@ -3,16 +3,18 @@ import Combine
 
 @main
 struct NexusDeckApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var app = AppState()
 
     var body: some Scene {
         WindowGroup("NexusDeck", id: "main") {
             ShellView()
                 .withAppEnvironment(app)
-                .frame(minWidth: 1127, minHeight: 917)
-                .task { app.start() }
+                .frame(minWidth: 1320, minHeight: 820)
+                .task { app.start(); delegate.app = app }
         }
-        .defaultSize(width: 1127, height: 917)
+        .defaultSize(width: 1440, height: 880)
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {}
         }
@@ -61,6 +63,7 @@ final class AppState: ObservableObject {
     private var sdkSync: AnyCancellable?
     private var softGainSync: AnyCancellable?
     private var mixSync: AnyCancellable?
+    private var loadingSync: AnyCancellable?
     private var started = false
 
     init() {
@@ -71,6 +74,15 @@ final class AppState: ObservableObject {
         engine = ActionEngine(store: store, deck: deck, audio: audio, obs: OBSClient())
     }
 
+    func shutdown() {
+        SDKHost.shared.shutdown()
+        // Stopping the USB audio makes the mixer reset its LEDs: do it first, then turn them off.
+        bridge.stop()
+        Thread.sleep(forTimeInterval: 0.8)
+        session?.shutdown()
+        appRouter.hideAllDevices()
+    }
+
     func start() {
         guard !started else { return }
         started = true
@@ -79,9 +91,28 @@ final class AppState: ObservableObject {
         bridge.setSingleMix(!store.mixer.dualMix && !store.mixer.obsTracks)
         bridge.start(sampleRate: Double(store.library.device.sampleRate))
         appRouter.start()
+        // The window stays blurred until the mixer is set up (or a few seconds without a mixer).
+        loadingSync = deck.$deviceReady.filter { $0 }.first().sink { [ui] _ in ui.loading = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [self] in
+            if !deviceManager.state.isConnected { ui.loading = false }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [ui] in ui.loading = false }
+        // Windows restored from the previous layout can be smaller than the new minimum size.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            for w in NSApp.windows where w.styleMask.contains(.titled) && w.frame.width < 1320 {
+                var f = w.frame
+                f.size = NSSize(width: max(f.width, 1440), height: max(f.height, 880))
+                w.setFrame(f, display: true)
+                w.center()
+            }
+        }
+        #if DEBUG
+        DebugSnapshot.install(ui: ui, editor: editor, deck: deck)
+        #endif
         Updater.shared.startAutomaticChecks()
         appRouter.setVisibility(dualMix: store.mixer.dualMix, obsTracks: store.mixer.obsTracks)
         appRouter.setNames(store.mixer)
+        appRouter.restoreDefaultOutput()
         mixSync = store.objectWillChange.debounce(for: .milliseconds(200), scheduler: RunLoop.main).sink { [self] _ in
             bridge.setSingleMix(!store.mixer.dualMix && !store.mixer.obsTracks)
             appRouter.setVisibility(dualMix: store.mixer.dualMix, obsTracks: store.mixer.obsTracks)
@@ -110,7 +141,6 @@ final class AppState: ObservableObject {
         SDKHost.shared.start(store: store, deck: deck)
         sdkSync = deck.needsRedraw.debounce(for: .milliseconds(300), scheduler: RunLoop.main).sink { SDKHost.shared.syncInstances() }
         runDebugArguments()
-        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { SDKHost.shared.shutdown(); self?.session?.shutdown() } }
         engine.syncStates()
     }
 
@@ -136,5 +166,33 @@ final class AppState: ObservableObject {
             let url = s.hasPrefix("http") ? URL(string: s)! : URL(fileURLWithPath: s)
             Task { await PackageManager.shared.install(from: url); SDKHost.shared.debugLog("installed: \(PackageManager.shared.packages.map(\.uuid)) error=\(PackageManager.shared.lastError ?? "-")") }
         }
+    }
+}
+
+/// Quit: the window blurs with "Scollegamento dal mixer…" while the panel plays its closing animation,
+/// the LEDs and the panel turn off and the audio devices are hidden; then the app quits.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    weak var app: AppState?
+    private var quitting = false
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let app, !quitting else { return .terminateNow }
+        quitting = true
+        app.ui.closing = true
+        app.ui.loading = true
+        // Let the blurred window appear, then do the (blocking) shutdown.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            app.shutdown()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        // Safety net.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 10) { exit(0) }
+        return .terminateLater
+    }
+
+    /// "Chiudi applicazione" in the settings: the red button quits.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        !UserDefaults.standard.bool(forKey: "closeMinimizes") && UserDefaults.standard.object(forKey: "closeMinimizes") != nil
     }
 }

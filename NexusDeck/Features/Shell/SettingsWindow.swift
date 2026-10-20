@@ -9,44 +9,55 @@ struct SettingsWindow: View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Impostazioni").font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.textMid)
-                        .padding(.leading, 24).frame(height: 70, alignment: .center)
+                    Text("Impostazioni").font(.system(size: 15, weight: .bold))
+                        .padding(.leading, 16).frame(height: 56, alignment: .center)
                     ForEach(SettingsPage.allCases) { p in
+                        let on = ui.settingsPage == p
                         Button { ui.settingsPage = p } label: {
-                            HStack(spacing: 0) {
-                                Rectangle().fill(ui.settingsPage == p ? Theme.accent : Color(hex: "#262626")).frame(width: 3)
-                                Text(p.title).font(.system(size: 14.5))
-                                    .foregroundStyle(ui.settingsPage == p ? Theme.accent : Theme.textMid)
-                                    .padding(.leading, 10)
-                                    .frame(width: 211, height: 30, alignment: .leading)
-                                    .background(ui.settingsPage == p ? Theme.settingsMenuSel : .clear)
-                                    .padding(.leading, 12)
+                            HStack(spacing: 10) {
+                                RoundedRectangle(cornerRadius: 6).fill(p.tint)
+                                    .frame(width: 24, height: 24)
+                                    .overlay(Image(systemName: p.symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white))
+                                Text(p.title).font(.system(size: 13, weight: on ? .medium : .regular)).foregroundStyle(on ? Color.white : Theme.text)
+                                Spacer(minLength: 0)
                             }
-                            .frame(height: 36)
+                            .padding(.horizontal, 8).frame(height: 34)
+                            .background(on ? Theme.accent : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .padding(.leading, 8)
                     }
                     Spacer()
                 }
+                .padding(.horizontal, 10)
                 .frame(width: 244)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) { page }
-                        .padding(.top, 34).padding(.trailing, 22)
-                        .frame(width: 888 - 244 - 10, alignment: .leading)
-                        .clipped()
+                .background(VisualEffect(material: .sidebar))
+                VStack(spacing: 0) {
+                    HStack(spacing: 10) {
+                        let p = ui.settingsPage ?? .general
+                        RoundedRectangle(cornerRadius: 7).fill(p.tint).frame(width: 28, height: 28)
+                            .overlay(Image(systemName: p.symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white))
+                        Text(p.title).font(.system(size: 17, weight: .bold))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 28).frame(height: 60)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) { page }
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    HStack { Spacer(); FlatButton(title: "Fine", prominent: true, width: 90) { dismiss() } }
+                        .padding(.horizontal, 20).frame(height: 56)
+                        .overlay(alignment: .top) { Rectangle().fill(Theme.separator).frame(height: 0.5) }
                 }
-                .padding(.leading, 10)
+                .background(Theme.canvas)
             }
-            HStack { Spacer(); FlatButton(title: "Chiudi", width: 120) { dismiss() } }
-                .padding(.horizontal, 16).frame(height: 64)
-                .background(Theme.settingsFooter)
         }
-        .frame(width: 888, height: 750)
+        .frame(width: 900, height: 680)
         .background(Theme.settingsBg)
         .foregroundStyle(Theme.text)
-        .preferredColorScheme(.dark)
+        
     }
 
     @ViewBuilder private var page: some View {
@@ -72,10 +83,11 @@ struct SettingRow<C: View>: View {
     var labelWidth: CGFloat = 92
     @ViewBuilder var content: C
     var body: some View {
-        HStack(spacing: 18) {
-            Text(title).font(.system(size: 13)).foregroundStyle(Theme.textMid).frame(width: labelWidth, alignment: .leading)
-            content
+        HStack(spacing: 12) {
+            Text(title).font(.system(size: 13))
             if let info { InfoIcon(text: info) }
+            Spacer(minLength: 12)
+            content
         }
     }
 }
@@ -84,7 +96,7 @@ struct InfoIcon: View {
     let text: String
     @State private var show = false
     var body: some View {
-        Button { show.toggle() } label: { Image(systemName: "info.circle").font(.system(size: 15)).foregroundStyle(Theme.textDim) }
+        Button { show.toggle() } label: { Image(systemName: "info.circle").font(.system(size: 13)).foregroundStyle(Theme.textFaint) }
             .buttonStyle(.plain)
             .popover(isPresented: $show) { Text(text).font(.system(size: 12)).padding(12).frame(width: 260) }
     }
@@ -99,9 +111,10 @@ struct SwatchRow: View {
     var body: some View {
         HStack(spacing: 6) {
             ForEach([first] + Self.colors.dropFirst(first == Self.colors[0] ? 1 : 1).map { $0 }, id: \.self) { c in
-                Rectangle().fill(Color(hex: c)).frame(width: 20, height: 20)
-                    .padding(4)
-                    .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(hex.uppercased() == c.uppercased() ? Theme.accent : .clear, lineWidth: 1.5))
+                Circle().fill(Color(hex: c)).frame(width: 20, height: 20)
+                    .overlay(Circle().strokeBorder(Color.black.opacity(0.1), lineWidth: 0.5))
+                    .padding(3)
+                    .overlay(Circle().strokeBorder(hex.uppercased() == c.uppercased() ? Theme.accent : .clear, lineWidth: 2))
                     .onTapGesture { hex = c }
             }
         }
@@ -118,26 +131,34 @@ private struct GeneralPage: View {
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Dispositivo").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.textMid)
-            Text(deviceName).font(.system(size: 15, weight: .bold))
-            Text("Account").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.textMid).padding(.top, 10)
-            HStack {
-                BrandMark(size: 18)
-                Text("Nessun account richiesto").font(.system(size: 14))
-                Spacer()
-            }
+        SectionCard(title: "Dispositivo") {
+            info("Mixer", deviceName)
+            info("Account", "Nessun account richiesto")
         }
-        .padding(.horizontal, 20).padding(.vertical, 6)
         SectionCard(title: "Versione software") {
-            info("Applicazione:", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
-            info("Firmware:", firmware)
+            info("Applicazione", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
+            info("Firmware", firmware)
+            #if DEBUG
+            // Test only: simulates an update to the next version (shows the panel animation, the mixer is not touched).
+            if firmware != "—" && !DeviceSession.firmwareTestDone {
+                HStack {
+                    Text("Aggiornamento firmware (test)").font(.system(size: 13))
+                    Spacer()
+                    Text("Disponibile \(Self.nextVersion(firmware))").font(.system(size: 13)).foregroundStyle(Theme.accent)
+                    FlatButton(title: "Aggiorna", prominent: true, width: 100) {
+                        DistributedNotificationCenter.default().postNotificationName(Notification.Name("NexusDeck.firmwareDemo"), object: Self.nextVersion(firmware), userInfo: nil, deliverImmediately: true)
+                    }
+                }
+            }
+            #endif
             HStack {
-                info("Driver audio:", !bridge.isPlugInInstalled ? "non installato" : bridge.isPlugInOutdated ? "da aggiornare" : "aggiornato")
+                Text("Driver audio").font(.system(size: 13))
                 Spacer()
+                Text(!bridge.isPlugInInstalled ? "non installato" : bridge.isPlugInOutdated ? "da aggiornare" : "aggiornato")
+                    .font(.system(size: 13)).foregroundStyle(bridge.isPlugInOutdated || !bridge.isPlugInInstalled ? Color.orange : Theme.textDim)
                 FlatButton(title: !bridge.isPlugInInstalled ? "Installa driver" : bridge.isPlugInOutdated ? "Aggiorna driver" : "Reinstalla driver", width: 140) { _ = bridge.installPlugIn() }
             }
-            Text("© 2026 NexusDeck. Non affiliato ad AVerMedia.").font(.system(size: 11)).foregroundStyle(Theme.textMid)
+            Text("© 2026 NexusDeck. Non affiliato ad AVerMedia.").font(.system(size: 11)).foregroundStyle(Theme.textFaint)
         }
         SectionCard(title: "Aggiornamenti") {
             UpdateRow()
@@ -147,6 +168,14 @@ private struct GeneralPage: View {
                 DarkPicker(selection: .constant("it"), options: [("it", "Italiano"), ("en", "English (United States)")], height: 28).frame(width: 280)
                 Spacer()
                 FlatButton(title: "Applica", width: 130) {}
+            }
+        }
+        SectionCard(title: "Display del mixer") {
+            HStack {
+                Text("Animazione cambio pagina sul mixer").font(.system(size: 13))
+                InfoIcon(text: "Sperimentale: quando cambi pagina, il display del mixer mostra alcune immagini intermedie della pagina che scorre. Il display aggiorna circa 8 immagini al secondo, quindi l'effetto è a scatti.")
+                Spacer()
+                PillToggle(isOn: $store.library.device.pageAnimation)
             }
         }
         SectionCard(title: "Impostazioni della finestra") {
@@ -176,6 +205,12 @@ private struct GeneralPage: View {
         return "Nessun dispositivo collegato"
     }
 
+    static func nextVersion(_ v: String) -> String {
+        var p = v.split(separator: ".").map { Int($0) ?? 0 }
+        if !p.isEmpty { p[p.count - 1] += 1 }
+        return p.map(String.init).joined(separator: ".")
+    }
+
     private var firmware: String {
         if case .connected(let i) = devices.state, !i.firmwareVersion.isEmpty { return i.firmwareVersion }
         return "—"
@@ -183,14 +218,16 @@ private struct GeneralPage: View {
 
     private func info(_ k: String, _ v: String) -> some View {
         HStack(spacing: 20) {
-            Text(k).font(.system(size: 13)).foregroundStyle(Theme.textMid).frame(width: 110, alignment: .leading)
-            Text(v).font(.system(size: 13))
+            Text(k).font(.system(size: 13))
+            Spacer()
+            Text(v).font(.system(size: 13)).foregroundStyle(Theme.textDim)
         }
     }
 }
 
 private struct UpdateRow: View {
     @ObservedObject var updater = Updater.shared
+    @State private var showNotes = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -205,9 +242,9 @@ private struct UpdateRow: View {
             }
             Spacer()
             if case .available = updater.state {
-                FlatButton(title: "Aggiorna ora", width: 130) { Task { await updater.install() } }
+                FlatButton(title: "Novità e aggiorna…", width: 170) { showNotes = true }
             } else {
-                FlatButton(title: "Controlla aggiornamenti", width: 190) { Task { await updater.check() } }
+                FlatButton(title: "Controlla aggiornamenti", width: 190) { Task { await updater.check(); if updater.latestVersion != nil { showNotes = true } } }
                     .disabled(updater.state == .checking || updater.state == .downloading || updater.state == .installing)
             }
         }
@@ -217,17 +254,14 @@ private struct UpdateRow: View {
             DarkPicker(selection: $updater.frequency, options: Updater.Frequency.allCases.map { ($0, $0.title) }, height: 26).frame(width: 200)
             Spacer()
         }
-        if case .available = updater.state, !updater.notes.isEmpty {
-            ScrollView { Text(updater.notes).font(.system(size: 12)).foregroundStyle(Theme.textMid).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }
-                .frame(maxHeight: 110)
-        }
+        .sheet(isPresented: $showNotes) { UpdateSheet() }
     }
 }
 
 func radio(_ title: LocalizedStringKey, _ on: Bool, _ action: @escaping () -> Void) -> some View {
     Button(action: action) {
         HStack(spacing: 14) {
-            Circle().fill(Color(hex: "#151515")).frame(width: 16, height: 16)
+            Circle().fill(Theme.field).overlay(Circle().strokeBorder(Theme.cardBorder, lineWidth: 1)).frame(width: 16, height: 16)
                 .overlay(Circle().fill(Theme.accent).frame(width: 6, height: 6).opacity(on ? 1 : 0))
             Text(title).font(.system(size: 13)).foregroundStyle(Theme.textMid)
         }
@@ -461,10 +495,10 @@ private struct AccountSheet: View {
                 status(spotify.isLoggedIn, "Collegato", nil, spotify.lastError)
                 buttons(spotify.isLoggedIn, login: { spotify.clientID = store.library.integrations.spotifyClientID; Task { await spotify.login() } }, logout: spotify.logout)
             }
-            HStack { Spacer(); FlatButton(title: "Chiudi", width: 110) { dismiss() } }
+            HStack { Spacer(); FlatButton(title: "Fine", prominent: true, width: 90) { dismiss() } }
         }
         .padding(20).frame(width: 460)
-        .background(Theme.panel).preferredColorScheme(.dark)
+        .background(Theme.panel)
     }
 
     private func field(_ t: String, _ b: Binding<String>) -> some View {
@@ -860,7 +894,7 @@ private struct InteractiveLightingPage: View {
             LEDControls(led: led, zone: .status)
         }
         .padding(.horizontal, 40).padding(.vertical, 22)
-        .background(Color(hex: "#2B2B2B"))
+        .background(Theme.card)
         .overlay(alignment: .leading) { if selected { Rectangle().fill(Theme.accent).frame(width: 3) } }
         .padding(.horizontal, 20)
     }
@@ -898,7 +932,7 @@ private struct BackupPage: View {
                             Spacer()
                         }
                         .padding(.horizontal, 14).frame(height: 40)
-                        .background(Color(hex: "#262626"))
+                        .background(Theme.field).clipShape(RoundedRectangle(cornerRadius: 8))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)

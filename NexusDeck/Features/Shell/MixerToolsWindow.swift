@@ -41,7 +41,7 @@ struct MixerToolsWindow: View {
     }
 }
 
-private struct RoutingMatrix: View {
+struct RoutingMatrix: View {
     @EnvironmentObject var store: ProfileStore
     @EnvironmentObject var audio: AudioService
 
@@ -66,9 +66,9 @@ private struct RoutingMatrix: View {
                 }
                 ForEach(MixerChannel.allCases) { ch in
                     GridRow {
-                        HStack(spacing: 8) {
-                            Image(systemName: store.mixer.symbol(ch)).foregroundStyle(Theme.accent)
-                            Text(store.mixer.name(ch)).font(.system(size: 12, weight: .bold))
+                        HStack(spacing: 10) {
+                            ChannelTile(channel: ch, size: 26)
+                            Text(store.mixer.name(ch)).font(.system(size: 12.5, weight: .semibold))
                         }
                         .frame(width: 140, alignment: .leading)
                         ForEach(RouteOutput.allCases) { o in
@@ -81,6 +81,8 @@ private struct RoutingMatrix: View {
                     }
                 }
             }
+            .padding(18).background(Theme.card).clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.cardBorder, lineWidth: 1))
             if store.mixer.isRouted(.mic, to: .headphones) && !store.mixer.micMonitor {
                 Text("Il microfono in cuffia si sente solo con il Monitor attivo.")
                     .font(.system(size: 11)).foregroundStyle(Theme.textDim)
@@ -110,7 +112,7 @@ private struct RoutingMatrix: View {
     }
 }
 
-private struct DuckingPage: View {
+struct DuckingPage: View {
     @EnvironmentObject var store: ProfileStore
     @EnvironmentObject var audio: AudioService
 
@@ -170,6 +172,9 @@ private struct DuckingPage: View {
                 Text("Solo in diretta (in cuffia i volumi restano invariati)").font(.system(size: 12)).foregroundStyle(Theme.textMid)
             }
         }
+        .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card).clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.cardBorder, lineWidth: 1))
     }
 
     private func row<C: View>(_ t: LocalizedStringKey, _ v: String, @ViewBuilder _ c: () -> C) -> some View {
@@ -181,7 +186,7 @@ private struct DuckingPage: View {
     }
 }
 
-private struct ChannelNamesPage: View {
+struct ChannelNamesPage: View {
     @EnvironmentObject var store: ProfileStore
 
     var body: some View {
@@ -203,7 +208,7 @@ private struct ChannelNamesPage: View {
 }
 
 /// Small icon button that opens a grid of SF Symbols suited to audio sources.
-private struct IconPicker: View {
+struct IconPicker: View {
     @Binding var selection: String
     @State private var open = false
 

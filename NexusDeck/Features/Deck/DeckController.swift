@@ -5,6 +5,19 @@ import Combine
 @MainActor
 final class DeckController: ObservableObject {
     @Published var currentPage = 0
+    /// Direction of the last page change (for the slide animation of the panel drawing).
+    @Published private(set) var pageForward = true
+    /// Live trackpad swipe on the panel drawing, in page widths (-1 … 1, negative = towards the next page).
+    @Published var swipeOffset: CGFloat = 0
+    /// Last moment a trackpad swipe moved the pages: taps just after it are not clicks on a key.
+    var lastSwipeActivity = Date.distantPast
+    var swipeJustHappened: Bool { swipeOffset != 0 || Date().timeIntervalSince(lastSwipeActivity) < 0.4 }
+
+    /// Pages next to the current one (wrapping, like the arrows), for the swipe preview.
+    var neighborPages: (previous: Int, next: Int) {
+        let n = max(profile.pageCount, 1)
+        return ((currentPage - 1 + n) % n, (currentPage + 1) % n)
+    }
     /// Page to return to when leaving a folder.
     @Published private(set) var pageStack: [Int] = []
     /// Current visual state index for multi-state keys.
@@ -12,6 +25,8 @@ final class DeckController: ObservableObject {
     /// Live text drawn on top of keys (counters, CPU, etc.).
     @Published var liveText: [UUID: String] = [:]
     @Published var panelOn = true
+    /// The connected mixer has received the profile (end of the start-up sequence).
+    @Published var deviceReady = false
 
     /// Bumped whenever the device needs a repaint.
     let needsRedraw = PassthroughSubject<Void, Never>()
@@ -24,8 +39,11 @@ final class DeckController: ObservableObject {
 
     var profile: HotkeyProfile { store.hotkey }
 
+    /// Function keys are physical buttons: one fixed set for the whole profile (stored on page 0),
+    /// as in the reference app. They do not change with the page.
     func keys(onPage page: Int, slot: SlotKind = .touch) -> [KeyAssignment] {
-        profile.keys.filter { $0.page == page && $0.slot == slot }
+        let p = slot == .functionKey ? 0 : page
+        return profile.keys.filter { $0.page == p && $0.slot == slot }
     }
 
     func key(at x: Int, _ y: Int, page: Int? = nil, slot: SlotKind = .touch) -> KeyAssignment? {
@@ -60,23 +78,35 @@ final class DeckController: ObservableObject {
 
     var isInFolder: Bool { currentPage >= PageID.groupBase }
 
-    func go(toPage page: Int) {
+    /// `forward` overrides the direction (the arrows wrap around: from the first page "back" is the last one).
+    func go(toPage page: Int, forward: Bool? = nil) {
         let maxPage = max(profile.pageCount - 1, 0)
         let p = min(max(page, 0), maxPage)
         pageStack.removeAll()
-        if currentPage != p { currentPage = p; needsRedraw.send() }
+        // The direction is set before the page, which is what the animations observe.
+        if currentPage != p { pageForward = forward ?? (p > currentPage); currentPage = p; needsRedraw.send() }
     }
 
-    func nextPage() { if !isInFolder { go(toPage: (currentPage + 1) % max(profile.pageCount, 1)) } }
-    func previousPage() { if !isInFolder { go(toPage: (currentPage - 1 + profile.pageCount) % max(profile.pageCount, 1)) } }
+    func nextPage() {
+        guard !isInFolder else { return }
+        let p = (currentPage + 1) % max(profile.pageCount, 1)
+        go(toPage: p, forward: true)
+    }
+    func previousPage() {
+        guard !isInFolder else { return }
+        let p = (currentPage - 1 + profile.pageCount) % max(profile.pageCount, 1)
+        go(toPage: p, forward: false)
+    }
 
     func enterFolder(_ page: Int) {
         pageStack.append(currentPage)
+        pageForward = true
         currentPage = page
         needsRedraw.send()
     }
 
     func leaveFolder() {
+        pageForward = false
         currentPage = pageStack.popLast() ?? 0
         needsRedraw.send()
     }
