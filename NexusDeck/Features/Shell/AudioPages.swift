@@ -288,7 +288,7 @@ struct DuckingPage: View {
     var body: some View {
         let d = store.mixer.ducking
         VStack(alignment: .leading, spacing: 22) {
-            PageHero(section: .ducking, subtitle: "Abbassa automaticamente la musica e il gioco quando parli.") {
+            PageHero(section: .ducking, subtitle: "Quando parli, la musica e il gioco si abbassano da soli: la tua voce resta sempre in primo piano.") {
                 PillToggle(isOn: Binding(get: { d.enabled }, set: { v in set { $0.enabled = v } }))
             }
             HStack(spacing: 16) {
@@ -406,11 +406,11 @@ struct OBSTracksPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            PageHero(section: .obs, subtitle: "Ogni canale diventa anche un ingresso audio del Mac, da mettere su una traccia diversa in OBS.") {
+            PageHero(section: .obs, subtitle: "Ogni canale diventa anche un ingresso audio del Mac, da mettere su una traccia diversa in OBS, Streamlabs o altri programmi di streaming.") {
                 PillToggle(isOn: Binding(get: { store.mixer.obsTracks }, set: { audio.setOBSTracks($0) }))
             }
             VStack(alignment: .leading, spacing: 7) {
-                Text("Ingressi disponibili in OBS").font(.system(size: 13, weight: .semibold)).padding(.leading, 4)
+                Text("Ingressi disponibili").font(.system(size: 13, weight: .semibold)).padding(.leading, 4)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
                     track(.mic, "[AM-IN] Chat Mic", "Solo la voce")
                     track(.lineIn, "[AM-IN] \(store.mixer.name(.lineIn).capitalized)", store.mixer.obsTracks ? "Line In fisico + dispositivo Line In" : "Dispositivo Line In del Mac")
@@ -422,11 +422,11 @@ struct OBSTracksPage: View {
             }
             .opacity(store.mixer.obsTracks ? 1 : 0.5)
             FormGroup(title: "Come usarle · es. musica in diretta ma non nel VOD") {
-                step(1, "In OBS aggiungi una sorgente «Acquisizione ingresso audio» per ogni canale e scegli il suo ingresso [AM-IN].")
-                step(2, "Apri Proprietà audio avanzate e assegna ogni sorgente alla sua traccia.")
+                step(1, "Nel programma di streaming aggiungi una sorgente di ingresso audio per ogni canale e scegli il suo ingresso [AM-IN].")
+                step(2, "Assegna ogni sorgente alla sua traccia (in OBS: Proprietà audio avanzate).")
                 step(3, "Togli la traccia della musica dalla traccia VOD di Twitch (Impostazioni → Uscita).")
             }
-            Text("Ogni ingresso segue la manopola, il muto e il ducking del suo canale.")
+            Text("Ogni ingresso segue la manopola, il muto e la voce in primo piano del suo canale.")
                 .font(.system(size: 11.5)).foregroundStyle(Theme.textDim).padding(.leading, 4)
         }
     }

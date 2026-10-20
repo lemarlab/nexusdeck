@@ -23,8 +23,8 @@ enum MainSection: String, CaseIterable {
         case .mic: "Microfono"
         case .apps: "Instradamento app"
         case .matrix: "Matrice audio"
-        case .ducking: "Ducking"
-        case .obs: "Tracce OBS"
+        case .ducking: "Voce in primo piano"
+        case .obs: "Tracce per lo streaming"
         case .lighting: "Illuminazione"
         case .integrations: "Integrazioni"
         }
@@ -518,7 +518,7 @@ struct Sidebar: View {
         return Button { withAnimation(.spring(response: 0.6, dampingFraction: 0.88)) { ui.section = s } } label: {
             HStack(spacing: 9) {
                 SidebarIcon(symbol: s.symbol, tint: s.tint)
-                Text(s.title).font(.system(size: 13, weight: on ? .medium : .regular))
+                Text(s == .obs ? "Tracce streaming" : s.title).font(.system(size: 13, weight: on ? .medium : .regular))
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10).frame(height: 30)

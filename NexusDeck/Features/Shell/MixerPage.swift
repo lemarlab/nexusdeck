@@ -38,8 +38,8 @@ struct MixerPage: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 8) {
                 chip("Dual Mix", "circle.lefthalf.filled", store.mixer.dualMix) { audio.setDualMix(!store.mixer.dualMix) }
-                chip("Tracce OBS", "record.circle", store.mixer.obsTracks) { audio.setOBSTracks(!store.mixer.obsTracks) }
-                chip(audio.ducked ? "Ducking attivo" : "Ducking", "arrow.down.right.and.arrow.up.left", store.mixer.ducking.enabled) { ui.section = .ducking }
+                chip("Tracce streaming", "record.circle", store.mixer.obsTracks) { audio.setOBSTracks(!store.mixer.obsTracks) }
+                chip(audio.ducked ? "Voce in primo piano · attiva" : "Voce in primo piano", "arrow.down.right.and.arrow.up.left", store.mixer.ducking.enabled) { ui.section = .ducking }
                 chip(store.mixer.micMonitor ? "Monitor attivo" : "Monitor spento", store.mixer.micMonitor ? "headphones" : "headphones.slash", store.mixer.micMonitor) {
                     audio.setMonitor(.mic, bus: .creator, !store.mixer.micMonitor)
                 }
