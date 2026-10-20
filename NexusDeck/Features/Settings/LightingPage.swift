@@ -38,6 +38,9 @@ struct LightingPage: View {
                 }
             }
         }
+        #if DEBUG
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NexusDeck.lightTab"))) { _ in tab = 1 }
+        #endif
     }
 
     private var zoneCards: some View {

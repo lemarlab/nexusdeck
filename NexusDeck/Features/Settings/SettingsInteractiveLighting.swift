@@ -31,10 +31,11 @@ struct InteractiveLightingPage: View {
                     DarkPicker(selection: dev(\.streamFirst), options: [(true, "La diretta"), (false, "La registrazione")]).frame(width: 180)
                 }
             }
-            HStack(alignment: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 18) {
                 lightCard("In diretta", "dot.radiowaves.left.and.right", "#FF3B30", dev(\.ledStream), reset: DeviceSettings().ledStream)
                 lightCard("In registrazione", "record.circle", "#0A84FF", dev(\.ledRecord), reset: DeviceSettings().ledRecord)
             }
+            .padding(.top, 12)
             .opacity(d.interactiveLighting ? 1 : 0.45)
             .allowsHitTesting(d.interactiveLighting)
         }
