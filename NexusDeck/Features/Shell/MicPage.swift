@@ -17,6 +17,7 @@ struct MicPage: View {
                 micCard
                 chain
                 detail
+                screamGuard
                 HStack(spacing: 6) {
                     Image(systemName: "info.circle")
                     Text("Se l'audio con gli effetti suona male, prova a ridurre il guadagno o il livello degli effetti.")
@@ -294,6 +295,71 @@ struct MicPage: View {
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: Scream protection
+
+    private var screamGuard: some View {
+        let g = store.mixer.screamGuard
+        func set(_ f: (inout ScreamGuard) -> Void) { f(&store.mixer.screamGuard); audio.updateScreamGuard() }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                SidebarIcon(symbol: "speaker.wave.3.fill", tint: Color(hex: "#FF3B30"))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Protezione urla").font(.system(size: 17, weight: .bold))
+                    Text("Se urli nel microfono, la voce viene abbassata o silenziata finché il livello non torna normale.")
+                        .font(.system(size: 11.5)).foregroundStyle(Theme.textDim)
+                }
+                Spacer()
+                if g.enabled {
+                    HStack(spacing: 6) {
+                        Circle().fill(audio.screaming ? Color(hex: "#FF3B30") : Theme.textFaint).frame(width: 8, height: 8)
+                            .shadow(color: audio.screaming ? Color(hex: "#FF3B30") : .clear, radius: 4)
+                        Text(audio.screaming ? (g.mode == .mute ? "Microfono silenziato" : "Voce abbassata") : "In ascolto")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                }
+                PillToggle(isOn: Binding(get: { g.enabled }, set: { v in set { $0.enabled = v } }))
+            }
+            .padding(.horizontal, 4)
+            VStack(alignment: .leading, spacing: 0) {
+                _VariadicView.Tree(DividedRows()) {
+                    HStack(spacing: 14) {
+                        Text("Quando urli").font(.system(size: 13))
+                        Spacer()
+                        pills([(ScreamGuard.Mode.lower, "Abbassa la voce"), (.mute, "Silenzia il microfono")], selected: g.mode) { m in set { $0.mode = m } }
+                    }
+                    HStack(spacing: 14) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Livello di urlo").font(.system(size: 13))
+                            Text("Ora \(Int(max(-60, audio.micInputDB))) dB · più è vicino a 0, più forte devi urlare")
+                                .font(.system(size: 11)).foregroundStyle(Theme.textDim)
+                        }
+                        Spacer()
+                        ThinSlider(value: Binding(get: { g.thresholdDB }, set: { v in store.mixer.screamGuard.thresholdDB = v.rounded() }), range: -30...0)
+                            .frame(width: 300)
+                        Text("\(Int(g.thresholdDB)) dB").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.textDim)
+                            .monospacedDigit().frame(width: 76, alignment: .trailing)
+                    }
+                    if g.mode == .lower {
+                        row("Riduzione", "−\(Int(g.reductionDB)) dB",
+                            Binding(get: { g.reductionDB }, set: { v in store.mixer.screamGuard.reductionDB = v.rounded() }), 6...40)
+                    }
+                    row("Ritorno alla normalità", "\(Int(g.releaseMs)) ms",
+                        Binding(get: { g.releaseMs }, set: { v in store.mixer.screamGuard.releaseMs = (v / 50).rounded() * 50 }), 200...3000)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.cardBorder, lineWidth: 1))
+            .opacity(g.enabled ? 1 : 0.5)
+            .allowsHitTesting(g.enabled)
+            if g.mode == .lower && g.enabled && Double(store.mixer.currentGainDB) < g.reductionDB {
+                Text("La riduzione non può superare il guadagno del microfono (\(store.mixer.currentGainDB) dB): la voce scende al massimo di quel valore.")
+                    .font(.system(size: 11.5)).foregroundStyle(Theme.textDim).padding(.leading, 4)
             }
         }
     }

@@ -81,6 +81,7 @@ struct MixerProfile: Codable, Identifiable, Hashable {
     /// Custom channel icons (SF Symbol names).
     var channelIcons: [String: String] = [:]
     var ducking = Ducking()
+    var screamGuard = ScreamGuard()
     /// OBS tracks mode: the Audience mix carries the physical Line In only (it becomes "Line In (OBS)"),
     /// every source reaches OBS on its own capture input.
     var obsTracks = false
@@ -107,6 +108,19 @@ enum RouteOutput: Int, CaseIterable, Identifiable {
 enum MicMuteMode: Int, Codable, CaseIterable, Identifiable {
     case all = 0, stream = 1, chat = 2
     var id: Int { rawValue }
+}
+
+/// Scream protection: while the mic goes above a level (a shout), it is lowered or muted everywhere.
+struct ScreamGuard: Codable, Hashable {
+    enum Mode: Int, Codable, CaseIterable { case lower = 0, mute = 1 }
+    var enabled = false
+    var mode: Mode = .lower
+    /// Mic input level (dBFS, after the gain) that counts as a shout.
+    var thresholdDB: Double = -3
+    /// How much the mic is lowered in "lower" mode.
+    var reductionDB: Double = 20
+    /// Time the protection stays on after the shout ends.
+    var releaseMs: Double = 600
 }
 
 /// Lowers music and game while you speak (ducking).

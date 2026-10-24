@@ -113,7 +113,20 @@ extension MixerProfile {
         channelNames = c.v("channelNames", [:])
         channelIcons = c.v("channelIcons", [:])
         ducking = c.v("ducking", Ducking())
+        screamGuard = c.v("screamGuard", ScreamGuard())
         obsTracks = c.v("obsTracks", false)
+    }
+}
+
+extension ScreamGuard {
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: AnyKey.self)
+        self.init()
+        enabled = c.v("enabled", false)
+        mode = c.v("mode", .lower)
+        thresholdDB = c.v("thresholdDB", -3)
+        reductionDB = c.v("reductionDB", 20)
+        releaseMs = c.v("releaseMs", 600)
     }
 }
 

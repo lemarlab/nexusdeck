@@ -110,6 +110,8 @@ final class AppState: ObservableObject {
         deviceManager.start()
         bridge.setSingleMix(!store.mixer.dualMix && !store.mixer.obsTracks)
         bridge.start(sampleRate: Double(store.library.device.sampleRate))
+        audio.micPeakSource = { [bridge] in bridge.takeMicPeak() }
+        audio.updateScreamGuard()
         appRouter.start()
         // Mixer link overlay: blurred window while connecting / reconnecting, error after 5 s without a mixer.
         loadingSync = deck.$deviceReady.removeDuplicates().sink { [self] ready in

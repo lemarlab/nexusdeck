@@ -20,6 +20,7 @@ final class AudioService: ObservableObject {
     // MARK: Full sync
 
     func applyAll() {
+        updateScreamGuard()
         applyMixer()
         applyMic()
         applyDSP()
@@ -90,7 +91,7 @@ final class AudioService: ObservableObject {
                 if mix.muted || (mix.channels[ch]?.muted ?? false) || !p.isRouted(ch, to: out) { m |= 1 << i }
             }
             // NexusDeck voice changer on: the clean mic is replaced (it comes back filtered on the Chat channel).
-            if (bus == .creator ? !hearsMic : !micInStream) || store.dsp.appVoiceActive { m |= 1 }
+            if (bus == .creator ? !hearsMic : !micInStream) || store.dsp.appVoiceActive || screamMuted { m |= 1 }
             if bus == .audience && p.obsTracks { m = 0x3F & ~(1 << 1) }
             masks.append(m)
         }
@@ -102,7 +103,7 @@ final class AudioService: ObservableObject {
     private var micInChatMix: Bool {
         let p = store.mixer
         let allMuted = micMuted(.creator) && micMuted(.audience)
-        return !p.chatMicMuted && !allMuted && p.isRouted(.mic, to: .chat) && !coughs(.chat)
+        return !p.chatMicMuted && !allMuted && p.isRouted(.mic, to: .chat) && !coughs(.chat) && !screamMuted
     }
 
     /// The channel is muted (by the user or the routing matrix) in some mix on the device.
@@ -252,7 +253,58 @@ final class AudioService: ObservableObject {
         c.sendInOrder([AXProtocol.micMonitor(mixer: 1, sync: 0),
                        AXProtocol.headphoneSource(0),
                        AXProtocol.mixerMutes(muteMasks())].map { var x = $0; x.preDelayMs = 0; return x })
-        c.send(AXProtocol.preampGain(MicGain.register(p.currentGainDB)))
+        c.send(AXProtocol.preampGain(MicGain.register(effectiveGainDB)))
+    }
+
+    // MARK: Scream protection
+
+    /// Mic peak straight from the audio (set by the app: the bridge).
+    var micPeakSource: () -> Float = { 0 }
+    @Published private(set) var screaming = false
+    private var screamMuted: Bool { screaming && store.mixer.screamGuard.mode == .mute }
+    private var lastScream = Date.distantPast
+    private var screamTimer: Timer?
+
+    /// Mic gain actually sent: lowered while the protection is on in "lower" mode.
+    private var effectiveGainDB: Int {
+        let p = store.mixer
+        guard screaming, p.screamGuard.mode == .lower else { return p.currentGainDB }
+        return max(0, p.currentGainDB - Int(p.screamGuard.reductionDB.rounded()))
+    }
+
+    /// Starts or stops watching the mic (every 20 ms) for the scream protection.
+    func updateScreamGuard() {
+        if store.mixer.screamGuard.enabled {
+            guard screamTimer == nil else { return }
+            _ = micPeakSource()
+            screamTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.screamTick() }
+            }
+        } else {
+            screamTimer?.invalidate(); screamTimer = nil
+            if screaming { setScreaming(false) }
+        }
+    }
+
+    private func screamTick() {
+        let g = store.mixer.screamGuard
+        guard g.enabled, controller != nil else { if screaming { setScreaming(false) }; return }
+        // Fast path: peak of the audio itself. The mixer meter (input, before any mute) keeps the level known
+        // while the mic is muted. While lowered, the level is measured lower by the reduction: added back.
+        let peakDB = 20 * log10(Double(max(micPeakSource(), 1e-9)))
+        let applied = Double(store.mixer.currentGainDB - effectiveGainDB)
+        let level = max(screamMuted ? -120 : peakDB, micInputDB) + applied
+        if level > g.thresholdDB { lastScream = Date() }
+        let should = Date().timeIntervalSince(lastScream) * 1000 < g.releaseMs
+        if should != screaming { setScreaming(should) }
+    }
+
+    private func setScreaming(_ on: Bool) {
+        screaming = on
+        guard let c = controller else { return }
+        // Coming back both are restored (the mode may have changed meanwhile).
+        if !on || store.mixer.screamGuard.mode == .mute { sendMutes() }
+        if !on || store.mixer.screamGuard.mode == .lower { c.send(AXProtocol.preampGain(MicGain.register(effectiveGainDB))) }
     }
 
     /// Reverb and echo only (fast: the toggles and sliders of these two effects send just this).

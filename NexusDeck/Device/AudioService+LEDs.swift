@@ -5,9 +5,12 @@ extension AudioService {
     /// Quit: every LED off (strip, function keys, rings).
     func allLEDsOff() {
         guard let c = controller else { return }
-        var cmds: [AXProtocol.Command] = [AXProtocol.auraStrip(sdkMode: 0, r: 0, g: 0, b: 0, speed: 0)]
+        // The strip goes last and twice (like sendAura): right after the panel images its first write can be dropped.
+        var cmds: [AXProtocol.Command] = []
         for i in 0..<4 { cmds.append(AXProtocol.functionKeyLED(index: i, on: false, r: 0, g: 0, b: 0)) }
         cmds.append(AXProtocol.knobRings(sdkMode: 0, r: 0, g: 0, b: 0, speed: 0))
+        let stripOff = AXProtocol.auraStrip(sdkMode: 0, r: 0, g: 0, b: 0, speed: 0)
+        cmds += [stripOff, stripOff]
         for var cmd in cmds { cmd.preDelayMs = 120; c.sendAndWait(cmd, timeout: 0.6) }
     }
 
@@ -41,6 +44,8 @@ extension AudioService {
             let groups = self.pendingLEDs
             self.pendingLEDs.removeAll()
             let s = self.store.library.device
+            // One sequence, in the same order as at quit: function keys 1-4, knob rings, then the strip.
+            var seq: [AXProtocol.Command] = groups.contains(.buttons) ? self.functionKeyCommands() : []
 
             if groups.contains(.knobs) && self.ringsKeepColors {
                 await self.restoreRingLevelMode()
@@ -51,7 +56,7 @@ extension AudioService {
                 if let reply = await c.transact(AXProtocol.readConfig1()), reply.count > 4 {
                     var cfg = reply[4] & ~0x0E
                     if k.sdk == 0 { cfg = reply[4] & ~0x06 } else if k.sdk == 7 { cfg |= 0x0A } else { cfg |= 0x0C }
-                    if cfg != reply[4] { c.send(AXProtocol.config1(cfg)); self.lastRings = nil }
+                    if cfg != reply[4] { seq.append(AXProtocol.config1(cfg)); self.lastRings = nil }
                     ringConfig = cfg
                 }
                 // Rings and the level mode go out in one burst, without the LED pre-delay: a ring write leaves the
@@ -83,17 +88,23 @@ extension AudioService {
                     add(AXProtocol.knobRings(sdkMode: k.sdk, r: kc.0, g: kc.1, b: kc.2, speed: speed))
                     self.lastRings = nil
                 }
-                if !burst.isEmpty { c.sendInOrder(burst) }
+                seq += burst
             }
-            if groups.contains(.aura) { self.sendAura(self.auraOverride ?? s.ledAura) }
-            if groups.contains(.buttons) { await self.sendFunctionKeyLEDs() }
+            if groups.contains(.aura) { seq += self.auraCommands(self.auraOverride ?? s.ledAura) }
+            if !seq.isEmpty { c.sendInOrder(seq) }
         }
     }
 
     /// Function key LEDs: off, the key's own background color, or one custom color.
     func sendFunctionKeyLEDs() async {
         guard let c = controller, !ringsKeepColors else { return }
+        c.sendInOrder(functionKeyCommands())
+    }
+
+    /// Function keys 1-4, in order.
+    func functionKeyCommands() -> [AXProtocol.Command] {
         let s = store.library.device
+        var cmds: [AXProtocol.Command] = []
         let colors = functionKeyColors()
         for i in 0..<4 {
             let source = s.ledButton.colorSource
@@ -105,16 +116,21 @@ extension AudioService {
             case .single: hex = s.ledButton.colorHex
             }
             let col = Self.rgb(hex, brightness: s.ledButton.brightness)
-            c.send(AXProtocol.functionKeyLED(index: i, on: on, r: col.0, g: col.1, b: col.2))
+            cmds.append(AXProtocol.functionKeyLED(index: i, on: on, r: col.0, g: col.1, b: col.2))
         }
+        return cmds
     }
 
     func sendAura(_ led: LEDSetting) {
         guard let c = controller else { return }
+        c.sendInOrder(auraCommands(led))
+    }
+
+    /// The strip, written twice: the mixer often drops a single strip write.
+    func auraCommands(_ led: LEDSetting) -> [AXProtocol.Command] {
         let e = AXProtocol.ledEffect(mode: led.mode.rawValue, peak: led.peak)
         let col = led.mode == .off ? (UInt8(0), UInt8(0), UInt8(0)) : (e.white ? (UInt8(255), UInt8(255), UInt8(255)) : Self.rgb(led.colorHex, brightness: led.brightness))
         let cmd = AXProtocol.auraStrip(sdkMode: e.sdk, r: col.0, g: col.1, b: col.2, speed: e.speed ? UInt8(led.speed) : 0)
-        c.send(cmd)
-        c.send(cmd)
+        return [cmd, cmd]
     }
 }

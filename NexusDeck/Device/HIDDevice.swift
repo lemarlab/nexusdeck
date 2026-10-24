@@ -70,7 +70,7 @@ final class HIDDevice {
 
     @discardableResult
     func setFeature(_ bytes: [UInt8]) -> IOReturn {
-        bytes.withUnsafeBufferPointer {
+        return bytes.withUnsafeBufferPointer {
             IOHIDDeviceSetReport(device, kIOHIDReportTypeFeature, 0, $0.baseAddress!, $0.count)
         }
     }
@@ -86,7 +86,7 @@ final class HIDDevice {
 
     @discardableResult
     func setOutput(_ bytes: [UInt8]) -> IOReturn {
-        bytes.withUnsafeBufferPointer {
+        return bytes.withUnsafeBufferPointer {
             IOHIDDeviceSetReport(device, kIOHIDReportTypeOutput, 0, $0.baseAddress!, $0.count)
         }
     }
@@ -100,3 +100,4 @@ extension IOHIDDevice {
         IOHIDDeviceGetProperty(self, key as CFString) as? String ?? ""
     }
 }
+

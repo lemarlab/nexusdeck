@@ -60,10 +60,20 @@ final class AudioBridge: ObservableObject {
         var fxToMixer: (Route, Route) = (Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0), Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0))
         var fx: UnsafeMutablePointer<VoiceFX.State>
         var scratch: UnsafeMutablePointer<Float>
+        /// Peak of the mic (Chat Mic input) since the main thread last read it.
+        var micPeak: UnsafeMutablePointer<Float>
     }
     /// Voice changer (shared with the IO thread).
     private let voiceState = VoiceFX.makeState()
     private let voiceScratch = UnsafeMutablePointer<Float>.allocate(capacity: 8192)
+    private let micPeakStore: UnsafeMutablePointer<Float> = { let p = UnsafeMutablePointer<Float>.allocate(capacity: 1); p.initialize(to: 0); return p }()
+
+    /// Mic peak (0…1) since the last call, read straight from the audio: much faster than the mixer meters.
+    func takeMicPeak() -> Float {
+        let v = micPeakStore.pointee
+        micPeakStore.pointee = 0
+        return v
+    }
 
     /// Selects the voice (0 = off). The filtered voice replaces the mic on Chat Mic and is sent back to the
     /// mixer on the Chat channel, so it is heard in the headphones and on stream.
@@ -292,6 +302,7 @@ final class AudioBridge: ObservableObject {
         ioProc = procID
         let s = AudioDeviceStart(agg, procID)
         status = s == noErr ? .running : .failed("Avvio fallito (\(s))")
+        SDKHost.shared.debugLog("Bridge started (\(s))")
     }
 
     /// Maps logical channels to (buffer, channel) pairs in the aggregate's buffer lists.
@@ -372,7 +383,7 @@ final class AudioBridge: ObservableObject {
         for i in 0..<Self.gainCount { (gp + i).initialize(to: gainValues[i]) }
         gp[0] = 1
         p.initialize(to: RoutePlan(count: Int32(count), gains: gp, routes: rp, fxIn: fxIn, fxToChatMic: fxChat, fxToMixer: fxMix,
-                                   fx: voiceState, scratch: voiceScratch))
+                                   fx: voiceState, scratch: voiceScratch, micPeak: micPeakStore))
         return p
     }
 
@@ -399,7 +410,19 @@ final class AudioBridge: ObservableObject {
                 vDSP_vsma(sp + sc, vDSP_Stride(sStride), &gain, dp + dc, vDSP_Stride(dStride), dp + dc, vDSP_Stride(dStride), vDSP_Length(frames))
             }
         }
+        micPeak(plan, ins)
         voice(plan, ins, outs)
+    }
+
+    /// Mic peak for the scream protection (Chat Mic input, left channel).
+    nonisolated private static func micPeak(_ plan: UnsafeMutablePointer<RoutePlan>, _ ins: UnsafeMutableAudioBufferListPointer) {
+        let r = plan.pointee.fxIn.0
+        guard r.srcBuffer >= 0, Int(r.srcBuffer) < ins.count, let d = ins[Int(r.srcBuffer)].mData?.assumingMemoryBound(to: Float.self) else { return }
+        let stride = max(Int(ins[Int(r.srcBuffer)].mNumberChannels), 1)
+        let frames = Int(ins[Int(r.srcBuffer)].mDataByteSize) / 4 / stride
+        var peak: Float = 0
+        vDSP_maxmgv(d + Int(r.srcChannel), vDSP_Stride(stride), &peak, vDSP_Length(frames))
+        if peak > plan.pointee.micPeak.pointee { plan.pointee.micPeak.pointee = peak }
     }
 
     /// Voice changer: mono mic from the Chat Mic input → effects → Chat Mic device (replacing the clean voice)

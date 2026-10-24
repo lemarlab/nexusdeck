@@ -83,15 +83,25 @@ final class DeviceSession {
             .store(in: &bag)
     }
 
+    /// Set after the first attach: later attaches are a mixer plugged back in while NexusDeck runs.
+    private var attachedBefore = false
+    private let launchDate = Date()
+
     private func attach(_ hid: HIDDevice) {
         let c = AXController(hid: hid)
+        let replug = attachedBefore
+        attachedBefore = true
+        // Plugged in while NexusDeck runs (not already there at launch).
+        let fresh = replug || Date().timeIntervalSince(launchDate) > 3
+        SDKHost.shared.debugLog("Attach (replug=\(replug))")
         lastFrame = nil
         lastSignature = nil
         // Nothing is drawn on the panel before the welcome animation.
         introUntil = .distantFuture
         ignoreKnobsUntil = .distantFuture
         controller = c
-        audio.controller = c
+        // A fresh plug gets the audio controller only after the mixer's start-up (see below).
+        if !fresh { audio.controller = c }
         deviceBag.removeAll()
         devices.inputReports.sink { c.handleInput($0) }.store(in: &deviceBag)
         c.events.receive(on: RunLoop.main).sink { [weak self] in self?.handle($0) }.store(in: &deviceBag)
@@ -101,6 +111,19 @@ final class DeviceSession {
         // rewritten at start (each colour write lights its ring fully for a moment).
         audio.ringsKeepColors = true
         Task {
+            // A mixer just plugged in runs its own start-up for about 10 s (it resets its LEDs at the end). Any
+            // command in that window leaves it without input reports (no touch, knobs or meters) until it is
+            // plugged in again. So nothing is sent until it has finished, then the start runs as at launch.
+            if fresh {
+                try? await Task.sleep(for: .seconds(11))
+                guard controller === c else { return }
+                audio.controller = c
+            }
+            // Strip primer: after being switched off, the mixer takes the first strip write without lighting it,
+            // and the next ones start from its own blue. One write now, seconds before the LEDs come on, makes
+            // the strip light straight in its colour.
+            let d = store.library.device
+            if let primer = audio.auraCommands(audio.auraOverride ?? d.ledAura).first { c.sendInOrder([primer]) }
             // The first reply can be lost while the device is still starting up (or busy): try a few times.
             for attempt in 0..<5 {
                 if let fw = await c.firmwareVersion() { devices.updateFirmwareVersion(fw); break }
@@ -122,6 +145,7 @@ final class DeviceSession {
             audio.applyMic()
             let wait = introUntil.timeIntervalSinceNow
             if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            guard controller === c else { return }
             introUntil = .distantPast
             deck.panelOn = true
             deck.deviceReady = true
@@ -133,13 +157,16 @@ final class DeviceSession {
             ignoreKnobsUntil = .distantFuture
             audio.applyMixer()
             try? await Task.sleep(for: .milliseconds(600))
+            guard controller === c else { return }
             // Volumes are in place: now the rings show the levels.
             // Volumes are set: strip, function keys and rings come back together, as fast as the mixer accepts.
             audio.ringsKeepColors = false
             lastFunctionKeyColors = audio.functionKeyColors()
             audio.applyLEDs(force: true)
+            SDKHost.shared.debugLog("Attach: LEDs sent")
 
             try? await Task.sleep(for: .seconds(1))
+            guard controller === c else { return }
             ignoreKnobsUntil = Date()
             audio.applyMic()
             // Startup check: the knobs (and their rings) must match the profile; resend if the mixer missed it.
@@ -172,7 +199,9 @@ final class DeviceSession {
     }
 
     private func detach() {
+        if controller != nil { SDKHost.shared.debugLog("Detach") }
         deck.deviceReady = false
+        audio.ledTask?.cancel()
         introUntil = .distantPast
         controller = nil
         audio.controller = nil
