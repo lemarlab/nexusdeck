@@ -178,7 +178,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 30;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = NexusDeck;
@@ -186,7 +186,7 @@
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "NexusDeck controlla altre app per eseguire le azioni dei tasti.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "NexusDeck usa il microfono per i livelli audio.";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nexusdeck.lemarlab;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -204,7 +204,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 30;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = NexusDeck;
@@ -212,7 +212,7 @@
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "NexusDeck controlla altre app per eseguire le azioni dei tasti.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "NexusDeck usa il microfono per i livelli audio.";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nexusdeck.lemarlab;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;

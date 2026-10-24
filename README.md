@@ -65,6 +65,8 @@
 - **macOS-style design**: native sidebar, light and dark appearance, System Settings-style grouped rows, live graphs, translucent materials, and a combined Widget / Mixer stage with smooth animations.
 - **Polished device experience**: start-up and shutdown animations on the panel, LEDs that stay off until the mixer is set up and turn off when NexusDeck quits, smooth page slides, fixed function keys.
 - **Noise gate calibration**: one click measures your room noise and sets the threshold.
+- **Voice cleanup**: AI noise reduction (removes fans, hum and hiss), an 80 Hz low cut and a de-esser, working with any microphone and together with the voice changer.
+- **Scream protection**: when you shout into the mic, your voice is lowered or muted everywhere until it is back to normal.
 - **Native Discord integration**: built in, no plug-ins to download.
 - **Native Apple Silicon app**, no Intel/Rosetta components.
 
@@ -89,6 +91,10 @@ xcodebuild -project NexusDeck.xcodeproj -scheme NexusDeck -configuration Release
 ```
 
 The audio driver (`AudioPlugin/`) is built automatically as part of the app build.
+
+## Third-party software
+
+NexusDeck includes [RNNoise](https://github.com/xiph/rnnoise) (BSD license, © Xiph.Org Foundation, Mozilla, Jean-Marc Valin) for the AI noise reduction. Its license is in `NexusDeck/ThirdParty/RNNoise/COPYING.txt`.
 
 ## License
 
