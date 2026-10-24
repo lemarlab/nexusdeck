@@ -91,6 +91,9 @@ extension AudioService {
                 seq += burst
             }
             if groups.contains(.aura) { seq += self.auraCommands(self.auraOverride ?? s.ledAura) }
+            // The level display (config1) above puts the Mic ring back to "muted": draw it again.
+            self.lastMicRing = nil
+            if let mic = self.micRingCommand() { seq.append(mic); self.lastMicRing = mic.bytes }
             if !seq.isEmpty { c.sendInOrder(seq) }
         }
     }
@@ -132,5 +135,70 @@ extension AudioService {
         let col = led.mode == .off ? (UInt8(0), UInt8(0), UInt8(0)) : (e.white ? (UInt8(255), UInt8(255), UInt8(255)) : Self.rgb(led.colorHex, brightness: led.brightness))
         let cmd = AXProtocol.auraStrip(sdkMode: e.sdk, r: col.0, g: col.1, b: col.2, speed: e.speed ? UInt8(led.speed) : 0)
         return [cmd, cmd]
+    }
+
+    // MARK: Mic ring while the voice goes through NexusDeck
+
+    /// When NexusDeck mutes the hardware mic in the stream mix, the mixer turns the Mic ring off. The ring is then
+    /// drawn by NexusDeck: lit in its colour up to the Mic volume, as the level display (off only if the user muted it).
+    func micRingCommand() -> AXProtocol.Command? {
+        let s = store.library.device
+        // The mixer ties the Mic ring to the mic mute of the Audience mix: whenever NexusDeck mutes it there
+        // (voice through the Mac, scream protection, cough key, routing), the ring is drawn by the app.
+        guard muteMasks().count > 1, muteMasks()[1] & 1 != 0, s.ledKnob.mode != .off, !ringsKeepColors else { return nil }
+        let k = AXProtocol.ledEffect(mode: s.ledKnob.mode.rawValue, peak: s.ledKnob.peak)
+        guard k.sdk != 0 else { return nil }
+        let p = store.mixer
+        let bus: MixBus = p.dualMix ? .audience : .creator
+        let mix = p.mixes[bus] ?? MixState()
+        let level = Double(mix.channels[.mic]?.level ?? 50) * Double(mix.level) / 100
+        let userMuted = (mix.channels[.mic]?.muted ?? false) || mix.muted
+        let length = userMuted ? 0 : UInt8(max(level > 0 ? 1 : 0, min(10, Int((level / 10).rounded()))))
+        let hex = s.ledKnob.colorSource == .perItem && s.ledKnob.mode.usesColor ? s.ledKnob.itemColors[0] : s.ledKnob.colorHex
+        let c = k.white ? (UInt8(255), UInt8(255), UInt8(255)) : Self.rgb(hex, brightness: s.ledKnob.brightness)
+        return AXProtocol.knobRing(0, sdkMode: k.sdk, r: c.0, g: c.1, b: c.2, speed: k.speed ? UInt8(s.ledKnob.speed) : 0, length: length)
+    }
+
+    /// Draws the Mic ring again. Every mute write makes the mixer redraw it (off, as the mic is muted), so this
+    /// runs after each one, shortly after the last change. When not needed, the ring goes back to the mixer.
+    func applyMicRing() {
+        // At most one pending redraw: a burst of writes (ducking fades) redraws it about every 120 ms.
+        guard micRingTask == nil else { return }
+        micRingTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard let self else { return }
+            self.micRingTask = nil
+            guard let c = self.controller, !self.ringsKeepColors else { return }
+            if let cmd = self.micRingCommand() {
+                self.lastMicRing = cmd.bytes
+                c.ringPatch = cmd.bytes
+                self.startMicRingKeepAlive()
+                var x = cmd; x.preDelayMs = 120
+                c.sendInOrder([x])
+            } else if self.lastMicRing != nil {
+                self.lastMicRing = nil
+                c.ringPatch = nil
+                // Back to the level display drawn by the mixer.
+                self.applyLEDs(force: true)
+            }
+        }
+    }
+
+    /// The mixer puts a ring drawn by the app back to its own display after a short while: while NexusDeck draws
+    /// the Mic ring it is refreshed twice a second (same content, no visible change).
+    func startMicRingKeepAlive() {
+        guard micRingTimer == nil else { return }
+        micRingTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard let c = self.controller, !self.ringsKeepColors, let cmd = self.micRingCommand() else {
+                    self.controller?.ringPatch = nil
+                    self.micRingTimer?.invalidate(); self.micRingTimer = nil
+                    return
+                }
+                c.ringPatch = cmd.bytes
+                c.refreshRingPatch()
+            }
+        }
     }
 }

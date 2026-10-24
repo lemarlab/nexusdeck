@@ -80,7 +80,7 @@ final class AudioService: ObservableObject {
 
     var micInStream: Bool { !micMuted(.audience) && store.mixer.isRouted(.mic, to: .stream) && !coughs(.stream) }
 
-    private func muteMasks() -> [UInt8] {
+    func muteMasks() -> [UInt8] {
         let p = store.mixer
         var masks: [UInt8] = []
         for bus in MixBus.allCases {
@@ -151,6 +151,7 @@ final class AudioService: ObservableObject {
     private var lastSpeech = Date.distantPast
     private var fadeTimer: Timer?
     private var lastFadeTick = Date()
+    private var lastDuckWrite = Date.distantPast
     /// Last volume step written per "bus.channel", so a fade only sends the steps that change.
     private var sentDuckSteps: [String: Int] = [:]
 
@@ -192,7 +193,12 @@ final class AudioService: ObservableObject {
         let duration = max(1, target > duckAmount ? d.fadeOutMs : d.fadeInMs)
         let step = dt / duration
         duckAmount = target > duckAmount ? min(target, duckAmount + step) : max(target, duckAmount - step)
-        applyDucking()
+        // Every volume write makes the mixer redraw all the knob rings: at most one fade step every 250 ms
+        // (the Mic ring drawn by the app needs that gap to be written again after it), the last one always.
+        if duckAmount == target || now.timeIntervalSince(lastDuckWrite) >= 0.25 {
+            lastDuckWrite = now
+            applyDucking()
+        }
         if duckAmount == target { fadeTimer?.invalidate(); fadeTimer = nil }
     }
 
@@ -254,6 +260,7 @@ final class AudioService: ObservableObject {
                        AXProtocol.headphoneSource(0),
                        AXProtocol.mixerMutes(muteMasks())].map { var x = $0; x.preDelayMs = 0; return x })
         c.send(AXProtocol.preampGain(MicGain.register(effectiveGainDB)))
+        applyMicRing()  // also when nothing was written (cleanup switched on or off)
     }
 
     // MARK: Scream protection
@@ -404,6 +411,10 @@ final class AudioService: ObservableObject {
     /// Overrides the ambient strip (live / recording indicators).
     var auraOverride: LEDSetting?
     var ledTask: Task<Void, Never>?
+    /// Last Mic ring drawn by NexusDeck (nil = the mixer draws it).
+    var lastMicRing: [UInt8]?
+    var micRingTask: Task<Void, Never>?
+    var micRingTimer: Timer?
 
     enum LEDGroup: Hashable { case knobs, aura, buttons }
     var pendingLEDs: Set<LEDGroup> = []

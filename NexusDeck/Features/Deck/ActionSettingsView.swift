@@ -47,6 +47,26 @@ enum MultimediaKey: String, CaseIterable, Identifiable {
         case .mute: "Muto"
         }
     }
+    var symbol: String {
+        switch self {
+        case .playPause: "playpause.fill"
+        case .next: "forward.fill"
+        case .previous: "backward.fill"
+        case .volumeUp: "speaker.wave.3.fill"
+        case .volumeDown: "speaker.wave.1.fill"
+        case .mute: "speaker.slash.fill"
+        }
+    }
+    var label: String {
+        switch self {
+        case .playPause: "Play/Pausa"
+        case .next: "Successivo"
+        case .previous: "Precedente"
+        case .volumeUp: "Volume +"
+        case .volumeDown: "Volume −"
+        case .mute: "Muto"
+        }
+    }
 }
 
 enum WindowOperation: String, CaseIterable, Identifiable {
@@ -166,7 +186,17 @@ struct ActionSettingsView: View {
         case ActionID.hotkey:
             HotkeyRecorder(settings: s)
         case ActionID.multimedia:
-            DropdownRowField(title: "Tasto", selection: s.string("key", MultimediaKey.playPause.rawValue), options: MultimediaKey.allCases.map { ($0.rawValue, $0.title) })
+            DropdownRowField(title: "Tasto", selection: Binding(get: { s.wrappedValue.string("key", MultimediaKey.playPause.rawValue) }, set: { v in
+                let old = MultimediaKey(rawValue: s.wrappedValue.string("key", MultimediaKey.playPause.rawValue)) ?? .playPause
+                s.wrappedValue["key"] = .string(v)
+                // The key follows the chosen function (icon and title), unless the user customised them.
+                guard let new = MultimediaKey(rawValue: v), key.actionID == ActionID.multimedia, !key.states.isEmpty else { return }
+                if key.states[0].image.isEmpty || key.states[0].image == "sf:" + old.symbol || key.states[0].image == "sf:playpause.fill" {
+                    key.states[0].image = "sf:" + new.symbol
+                }
+                let defaults = Set(MultimediaKey.allCases.map(\.label) + ["Multimedia", ""])
+                if defaults.contains(key.states[0].title) { key.states[0].title = new.label }
+            }), options: MultimediaKey.allCases.map { ($0.rawValue, $0.title) })
         case ActionID.text:
             TextField("Testo da digitare", text: s.string("text"), axis: .vertical).lineLimit(3...6)
             Toggle("Premi Invio alla fine", isOn: s.bool("enter"))

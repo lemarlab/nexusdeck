@@ -470,6 +470,11 @@ final class DeviceSession {
                 if i != 0, audio.hasMuteBit(channel: i) {
                     audio.reassertMutes()
                 }
+                // Voice through NexusDeck: the hardware mic must stay muted, and its ring is drawn by the app.
+                if i == 0, store.dsp.softwareVoiceActive {
+                    audio.reassertMutes()
+                    audio.applyMicRing()
+                }
                 _ = muted // The report bit does not reflect the mute state: it is read from the mixer on release.
             }
             engine.syncStates()

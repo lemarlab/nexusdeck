@@ -136,8 +136,23 @@ enum KeySynth {
         if pressEnter { press(keyCode: UInt16(kVK_Return), flags: []) }
     }
 
-    /// Media keys are delivered as NX system-defined events.
+    /// MediaRemote (system framework): play/pause, next and previous for whatever is playing, with no
+    /// Accessibility permission (the key events below need it, and lose it each time the app is rebuilt).
+    private static let sendMediaCommand: (@convention(c) (Int32, CFDictionary?) -> Bool)? = {
+        guard let h = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY),
+              let f = dlsym(h, "MRMediaRemoteSendCommand") else { return nil }
+        return unsafeBitCast(f, to: (@convention(c) (Int32, CFDictionary?) -> Bool).self)
+    }()
+
+    /// Media keys: play/pause, next and previous through MediaRemote; volume keys as NX system-defined events.
     static func media(_ key: MultimediaKey) {
+        let command: Int32? = switch key {
+        case .playPause: 2   // kMRTogglePlayPause
+        case .next: 4        // kMRNextTrack
+        case .previous: 5    // kMRPreviousTrack
+        default: nil
+        }
+        if let command, let send = sendMediaCommand, send(command, nil) { return }
         let nx: Int32
         switch key {
         case .playPause: nx = 16 // NX_KEYTYPE_PLAY

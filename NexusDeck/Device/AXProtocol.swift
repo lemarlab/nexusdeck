@@ -123,9 +123,10 @@ enum AXProtocol {
     }
 
     /// One knob ring (0 = Mic … 5 = Chat), verified on hardware.
-    static func knobRing(_ index: Int, sdkMode: Int, r: UInt8, g: UInt8, b: UInt8, speed: UInt8) -> Command {
+    /// `length` = LEDs lit, 0…10 (10 = the whole ring; verified on hardware: 5 lights half of it).
+    static func knobRing(_ index: Int, sdkMode: Int, r: UInt8, g: UInt8, b: UInt8, speed: UInt8, length: UInt8 = 0x0A) -> Command {
         let effect: UInt8 = sdkMode == 0 ? 0 : (sdkMode >= 7 ? 0x1F : UInt8((sdkMode << 3) | 7))
-        return write(0xC0, [0x01, UInt8(index), 0x0A, r, g, b, speed, 0x00, effect, 0x80], pre: ledPreDelay)
+        return write(0xC0, [0x01, UInt8(index), min(length, 0x0A), r, g, b, speed, 0x00, effect, 0x80], pre: ledPreDelay)
     }
 
     /// LED ids of function keys 0...3.
