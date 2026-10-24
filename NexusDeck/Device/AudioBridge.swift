@@ -77,6 +77,13 @@ final class AudioBridge: ObservableObject {
 
     /// Selects the voice (0 = off). The filtered voice replaces the mic on Chat Mic and is sent back to the
     /// mixer on the Chat channel, so it is heard in the headphones and on stream.
+    /// Voice cleanup stages (they run before the voice).
+    func setCleanup(lowCut: Bool, noise: Bool, deEss: Bool) {
+        voiceState.pointee.cleanLowCut = lowCut
+        voiceState.pointee.cleanNoise = noise
+        voiceState.pointee.cleanDeEss = deEss
+    }
+
     func setVoice(_ v: Int, returnGain: Float) {
         voiceState.pointee.voice = Int32(v)
         voiceState.pointee.returnGain = returnGain
@@ -429,7 +436,7 @@ final class AudioBridge: ObservableObject {
     /// and added to the Chat channel going back to the mixer.
     nonisolated private static func voice(_ plan: UnsafeMutablePointer<RoutePlan>, _ ins: UnsafeMutableAudioBufferListPointer, _ outs: UnsafeMutableAudioBufferListPointer) {
         let pl = plan.pointee
-        guard pl.fx.pointee.voice > 0, pl.fxIn.0.srcBuffer >= 0, pl.fxIn.1.srcBuffer >= 0 else { return }
+        guard pl.fx.pointee.voice > 0 || VoiceFX.cleaning(pl.fx), pl.fxIn.0.srcBuffer >= 0, pl.fxIn.1.srcBuffer >= 0 else { return }
         func ptr(_ l: UnsafeMutableAudioBufferListPointer, _ r: Route) -> (UnsafeMutablePointer<Float>, Int, Int)? {
             guard r.srcBuffer >= 0, Int(r.srcBuffer) < l.count, let d = l[Int(r.srcBuffer)].mData?.assumingMemoryBound(to: Float.self) else { return nil }
             let ch = Int(l[Int(r.srcBuffer)].mNumberChannels)

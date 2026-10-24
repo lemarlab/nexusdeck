@@ -54,7 +54,7 @@ struct FormGroup<Content: View>: View {
 }
 
 /// Title with a secondary description, for the leading side of a row.
-private struct RowLabel: View {
+struct RowLabel: View {
     let title: LocalizedStringKey
     var detail: LocalizedStringKey? = nil
     var body: some View {

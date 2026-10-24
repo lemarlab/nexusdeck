@@ -71,6 +71,9 @@ struct EQPreset: Identifiable {
         .init(id: "bass", title: "Più bassi", gains: [5, 4, 2, 0, 0, 0, 0, 0]),
         .init(id: "brightBass", title: "Brillante e corposo", gains: [5, 2, 1, 0, 0, 3, 5, 7]),
         .init(id: "radio", title: "Radio", gains: [-12, -6, 2, 4, 5, 3, -4, -10]),
+        .init(id: "sm7bBroadcast", title: "SM7B Broadcast", gains: [-12, -2, -3, -1, 0, 4, 2, 1]),
+        .init(id: "sm7bWarm", title: "SM7B Podcast caldo", gains: [-9, 1, -2, -1, 0, 2, 1, 0]),
+        .init(id: "sm7bGaming", title: "SM7B Gaming", gains: [-12, -4, -3, 0, 1, 5, 3, 1]),
     ]
 }
 

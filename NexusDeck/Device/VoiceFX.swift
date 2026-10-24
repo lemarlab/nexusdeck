@@ -39,6 +39,35 @@ enum VoiceFX {
         static let echoLength = 48000
         var echo: UnsafeMutablePointer<Float>
         var echoPos: Int = 0
+
+        // Voice cleanup (before the voice): low cut, noise reduction, de-esser.
+        var cleanLowCut = false, cleanNoise = false, cleanDeEss = false
+        var cleanRate: Float = 0
+        var hp = Biquad(), ds = Biquad()
+        var dsEnv: Float = 0
+        /// RNNoise (10 ms frames of 480 samples at 48 kHz): input frame and output queue.
+        var denoiser: OpaquePointer?
+        var nIn: UnsafeMutablePointer<Float>
+        var nInCount = 0
+        var nOut: UnsafeMutablePointer<Float>
+        var nRead = 0, nWrite = 0
+        static let frame = 480
+        static let queue = 4096
+    }
+
+    /// Direct-form biquad.
+    struct Biquad {
+        var b0: Float = 1, b1: Float = 0, b2: Float = 0, a1: Float = 0, a2: Float = 0
+        var x1: Float = 0, x2: Float = 0, y1: Float = 0, y2: Float = 0
+        mutating func run(_ x: Float) -> Float {
+            let y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+            x2 = x1; x1 = x; y2 = y1; y1 = y
+            return y
+        }
+        static func highPass(_ f: Float, _ sr: Float, q: Float = 0.707) -> Biquad {
+            let w = 2 * Float.pi * f / sr, alpha = sin(w) / (2 * q), c = cos(w), a0 = 1 + alpha
+            return Biquad(b0: (1 + c) / 2 / a0, b1: -(1 + c) / a0, b2: (1 + c) / 2 / a0, a1: -2 * c / a0, a2: (1 - alpha) / a0)
+        }
     }
 
     static func makeState() -> UnsafeMutablePointer<State> {
@@ -46,14 +75,21 @@ enum VoiceFX {
         line.initialize(repeating: 0, count: State.lineLength)
         let echo = UnsafeMutablePointer<Float>.allocate(capacity: State.echoLength)
         echo.initialize(repeating: 0, count: State.echoLength)
+        let nIn = UnsafeMutablePointer<Float>.allocate(capacity: State.frame)
+        nIn.initialize(repeating: 0, count: State.frame)
+        let nOut = UnsafeMutablePointer<Float>.allocate(capacity: State.queue)
+        nOut.initialize(repeating: 0, count: State.queue)
         let p = UnsafeMutablePointer<State>.allocate(capacity: 1)
-        p.initialize(to: State(line: line, echo: echo))
+        p.initialize(to: State(line: line, echo: echo, denoiser: rnnoise_create(nil), nIn: nIn, nOut: nOut))
         return p
     }
 
     static func freeState(_ p: UnsafeMutablePointer<State>) {
         p.pointee.line.deallocate()
         p.pointee.echo.deallocate()
+        p.pointee.nIn.deallocate()
+        p.pointee.nOut.deallocate()
+        if let d = p.pointee.denoiser { rnnoise_destroy(d) }
         p.deallocate()
     }
 
@@ -88,6 +124,7 @@ enum VoiceFX {
 
     /// Processes `count` mono samples in place (IO thread).
     static func process(_ s: UnsafeMutablePointer<State>, _ buf: UnsafeMutablePointer<Float>, _ count: Int) {
+        clean(s, buf, count)
         let v = s.pointee.voice
         guard v > 0 else { return }
         let p = params(v)
@@ -162,5 +199,63 @@ enum VoiceFX {
             buf[i] = max(-1, min(1, x * p.gain))
         }
         s.pointee.write = write; s.pointee.phase = phase; s.pointee.lfo = lfo; s.pointee.ring = ring; s.pointee.echoPos = echoPos
+    }
+
+    /// Whether any cleanup stage is on.
+    static func cleaning(_ s: UnsafeMutablePointer<State>) -> Bool {
+        s.pointee.cleanLowCut || s.pointee.cleanNoise || s.pointee.cleanDeEss
+    }
+
+    /// Voice cleanup, in place: low cut (80 Hz), RNNoise noise reduction (48 kHz only), de-esser (above 5 kHz).
+    static func clean(_ s: UnsafeMutablePointer<State>, _ buf: UnsafeMutablePointer<Float>, _ count: Int) {
+        guard cleaning(s) else { return }
+        let sr = s.pointee.sampleRate
+        if s.pointee.cleanRate != sr {
+            s.pointee.cleanRate = sr
+            s.pointee.hp = .highPass(80, sr)
+            s.pointee.ds = .highPass(5000, sr)
+            s.pointee.dsEnv = 0
+        }
+        if s.pointee.cleanLowCut {
+            for i in 0..<count { buf[i] = s.pointee.hp.run(buf[i]) }
+        }
+        if s.pointee.cleanNoise, sr == 48000, let d = s.pointee.denoiser {
+            let F = State.frame, Q = State.queue
+            let nIn = s.pointee.nIn, nOut = s.pointee.nOut
+            for i in 0..<count {
+                nIn[s.pointee.nInCount] = buf[i] * 32768
+                s.pointee.nInCount += 1
+                if s.pointee.nInCount == F {
+                    s.pointee.nInCount = 0
+                    // In place: RNNoise allows out == in.
+                    rnnoise_process_frame(d, nIn, nIn)
+                    for k in 0..<F {
+                        nOut[s.pointee.nWrite] = nIn[k] / 32768
+                        s.pointee.nWrite = (s.pointee.nWrite + 1) % Q
+                    }
+                }
+                // One frame of delay: the output starts once a whole frame has been processed.
+                if s.pointee.nRead != s.pointee.nWrite {
+                    buf[i] = nOut[s.pointee.nRead]
+                    s.pointee.nRead = (s.pointee.nRead + 1) % Q
+                } else {
+                    buf[i] = 0
+                }
+            }
+        }
+        if s.pointee.cleanDeEss {
+            // The band above 5 kHz is turned down while it is loud (sibilants), by up to about 9 dB.
+            let attack: Float = 1 - exp(-1 / (0.002 * sr)), release: Float = 1 - exp(-1 / (0.08 * sr))
+            let threshold: Float = 0.06
+            for i in 0..<count {
+                let x = buf[i]
+                let hi = s.pointee.ds.run(x)
+                let a = abs(hi)
+                s.pointee.dsEnv += (a - s.pointee.dsEnv) * (a > s.pointee.dsEnv ? attack : release)
+                let env = s.pointee.dsEnv
+                let g: Float = env > threshold ? max(0.35, sqrt(threshold / env)) : 1
+                buf[i] = x - hi + hi * g
+            }
+        }
     }
 }

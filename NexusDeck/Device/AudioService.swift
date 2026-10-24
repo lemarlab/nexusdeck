@@ -91,7 +91,7 @@ final class AudioService: ObservableObject {
                 if mix.muted || (mix.channels[ch]?.muted ?? false) || !p.isRouted(ch, to: out) { m |= 1 << i }
             }
             // NexusDeck voice changer on: the clean mic is replaced (it comes back filtered on the Chat channel).
-            if (bus == .creator ? !hearsMic : !micInStream) || store.dsp.appVoiceActive || screamMuted { m |= 1 }
+            if (bus == .creator ? !hearsMic : !micInStream) || store.dsp.softwareVoiceActive || screamMuted { m |= 1 }
             if bus == .audience && p.obsTracks { m = 0x3F & ~(1 << 1) }
             masks.append(m)
         }
@@ -325,7 +325,7 @@ final class AudioService: ObservableObject {
 
     /// Voice changer: gain of the filtered voice sent back to the mixer (heard in headphones / on stream).
     var voiceReturnGain: Float {
-        guard store.dsp.appVoiceActive else { return 0 }
+        guard store.dsp.softwareVoiceActive else { return 0 }
         return hearsMic || micInStream ? 1 : 0
     }
 

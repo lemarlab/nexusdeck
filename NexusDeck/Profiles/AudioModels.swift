@@ -233,6 +233,12 @@ struct DSPProfile: Codable, Identifiable, Hashable {
     var appVoice: Int = 1
     var appVoiceOn = false
     var appVoiceActive: Bool { appVoiceOn && appVoice > 0 }
+    /// Voice cleanup done by NexusDeck (software): low cut, AI noise reduction, de-esser.
+    var cleanLowCut = false
+    var cleanNoise = false
+    var cleanDeEss = false
+    /// The mic goes through NexusDeck (voice changer or cleanup): the clean hardware mic is replaced.
+    var softwareVoiceActive: Bool { appVoiceActive || cleanLowCut || cleanNoise || cleanDeEss }
 
     static let defaultFrequencies: [Double] = [50, 100, 250, 500, 1000, 4000, 8000, 16000]
 
