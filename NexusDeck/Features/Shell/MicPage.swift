@@ -15,7 +15,6 @@ struct MicPage: View {
         PageScroll {
             VStack(alignment: .leading, spacing: 22) {
                 micCard
-                presets
                 chain
                 detail
                 cleanup
@@ -299,61 +298,6 @@ struct MicPage: View {
                 .buttonStyle(.plain)
             }
         }
-    }
-
-    // MARK: SM7B presets
-
-    /// One click: EQ, compressor and gate tuned for a Shure SM7B (from the usual broadcast advice).
-    private struct MicPreset { let id: String; let title: String; let detail: String; let threshold: Double; let ratio: Double; let attack: Double; let release: Double; let makeup: Double }
-    private static let micPresets: [MicPreset] = [
-        .init(id: "sm7bBroadcast", title: "SM7B Broadcast", detail: "Voce da radio: bassi puliti, presenza", threshold: -20, ratio: 0.75, attack: 5, release: 120, makeup: 6),
-        .init(id: "sm7bWarm", title: "SM7B Podcast caldo", detail: "Calda e morbida, per parlare a lungo", threshold: -18, ratio: 0.6, attack: 10, release: 150, makeup: 4),
-        .init(id: "sm7bGaming", title: "SM7B Gaming", detail: "Chiara e presente sopra il gioco", threshold: -22, ratio: 0.8, attack: 3, release: 100, makeup: 7),
-    ]
-
-    private var presets: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Preimpostazioni per Shure SM7B").font(.system(size: 13, weight: .semibold))
-                Spacer()
-                Text("Imposta equalizzatore, compressore e noise gate in un clic").font(.system(size: 11.5)).foregroundStyle(Theme.textDim)
-            }
-            .padding(.horizontal, 4)
-            HStack(spacing: 10) {
-                ForEach(Self.micPresets, id: \.id) { p in
-                    let on = matchingPreset == p.id
-                    Button { applyPreset(p) } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(p.title).font(.system(size: 13, weight: .semibold))
-                            Text(p.detail).font(.system(size: 11)).foregroundStyle(Theme.textDim).lineLimit(1)
-                        }
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(on ? Theme.accent.opacity(0.1) : Theme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(on ? Theme.accent : Theme.cardBorder, lineWidth: on ? 2 : 1))
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    private func applyPreset(_ p: MicPreset) {
-        guard let eq = EQPreset.all.first(where: { $0.id == p.id }) else { return }
-        var bands = store.dsp.currentEQ
-        for i in bands.indices { bands[i].gain = eq.gains[i] }
-        store.dsp.currentEQ = bands
-        store.dsp.eqEnabled = true
-        let i = store.dsp.compressorPresetIndex
-        store.dsp.compressorPresets[i] = Compressor(threshold: p.threshold, ratio: p.ratio, attack: p.attack, release: p.release)
-        store.dsp.makeupGain = p.makeup
-        store.dsp.compressorEnabled = true
-        store.dsp.noiseGateEnabled = true
-        audio.applyEQ()
-        audio.applyCompressor()
-        audio.applyGate()
     }
 
     // MARK: Voice cleanup (software)
