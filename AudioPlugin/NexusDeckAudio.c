@@ -11,6 +11,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <mach/mach_time.h>
 #include <pthread.h>
+#include <os/lock.h>
 #include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>
@@ -94,6 +95,10 @@ static UInt64 gTimestampCounter[kDeviceCount];
 static float* gRings[kPairCount];
 /// Audio routed here from clients of other devices (see ProcessOutput).
 static float* gSide[kPairCount];
+/// Side rings are written by the IO threads of other devices and drained by the pair's bridge.
+static os_unfair_lock gSideLock[kPairCount];
+/// Guards gClients between the IO threads (ClientTarget) and client add/remove/re-targeting.
+static os_unfair_lock gClientsLock = OS_UNFAIR_LOCK_INIT;
 
 #pragma mark - Per-app routing
 
@@ -105,11 +110,14 @@ static _Atomic UInt32 gVisibleMask = 0;
 static inline bool IsPublished(UInt32 i) { return kDevices[i].hidden || ((atomic_load(&gVisibleMask) >> i) & 1u); }
 /// Custom device names set by NexusDeck ('ndnm': "index=name\n..."); empty = default name.
 #define kNamesSelector 'ndnm'
+/// Read-only diagnostics ('nddb'): clients, their targets and per-app routing counters.
+#define kDebugSelector 'nddb'
+static _Atomic UInt64 gDbgProcessOutput = 0, gDbgRouted = 0, gDbgNotRead = 0;
 static char gNames[64][128];
 static CFStringRef gNamesString = NULL;
 
 static UInt32 PublishedCount(void) { UInt32 n = 0; for (UInt32 i = 0; i < kDeviceCount; i++) if (IsPublished(i)) n++; return n; }
-#define kMaxClients      256
+#define kMaxClients      1024
 #define kMaxRoutes       64
 
 typedef struct { UInt32 device; UInt32 client; char bundle[256]; _Atomic int target; } ClientEntry;
@@ -149,13 +157,25 @@ static void ApplyRoutes(CFStringRef str) {
             gRouteCount++;
         }
     }
+    os_unfair_lock_lock(&gClientsLock);
     for (UInt32 i = 0; i < gClientCount; i++) atomic_store(&gClients[i].target, RouteFor(gClients[i].bundle));
+    os_unfair_lock_unlock(&gClientsLock);
 }
 
 static int ClientTarget(UInt32 device, UInt32 client) {
+    int t = -1;
+    os_unfair_lock_lock(&gClientsLock);
     for (UInt32 i = 0; i < gClientCount; i++)
-        if (gClients[i].device == device && gClients[i].client == client) return atomic_load(&gClients[i].target);
-    return -1;
+        if (gClients[i].device == device && gClients[i].client == client) { t = atomic_load(&gClients[i].target); break; }
+    os_unfair_lock_unlock(&gClientsLock);
+    return t;
+}
+
+/// Some input device of the pair is running, so its side ring is being drained.
+static bool PairIsRead(int pair) {
+    for (UInt32 i = 0; i < kDeviceCount; i++)
+        if (kDevices[i].input && kDevices[i].pair == pair && gIOCount[i] > 0) return true;
+    return false;
 }
 
 #pragma mark - Helpers
@@ -256,6 +276,7 @@ static OSStatus Initialize(AudioServerPlugInDriverRef inDriver, AudioServerPlugI
     for (int i = 0; i < kPairCount; i++) {
         gRings[i] = calloc(kRingFrames * kChannels, sizeof(float));
         gSide[i] = calloc(kRingFrames * kChannels, sizeof(float));
+        gSideLock[i] = OS_UNFAIR_LOCK_INIT;
     }
     return 0;
 }
@@ -265,16 +286,23 @@ static OSStatus DestroyDevice(AudioServerPlugInDriverRef d, AudioObjectID o) { (
 static OSStatus AddDeviceClient(AudioServerPlugInDriverRef d, AudioObjectID o, const AudioServerPlugInClientInfo* c) {
     (void)d;
     if (!c) return 0;
+    // Only the visible outputs route per app: every process is a client of every device, keep the table small.
+    int di = DeviceIndex(o);
+    if (di < 0 || kDevices[di].input || kDevices[di].hidden) return 0;
+    char bundle[256] = {0};
+    if (c->mBundleID) CFStringGetCString(c->mBundleID, bundle, sizeof(bundle), kCFStringEncodingUTF8);
     pthread_mutex_lock(&gMutex);
+    int target = RouteFor(bundle);
+    os_unfair_lock_lock(&gClientsLock);
     if (gClientCount < kMaxClients) {
         ClientEntry* e = &gClients[gClientCount];
         e->device = o;
         e->client = c->mClientID;
-        e->bundle[0] = 0;
-        if (c->mBundleID) CFStringGetCString(c->mBundleID, e->bundle, sizeof(e->bundle), kCFStringEncodingUTF8);
-        atomic_store(&e->target, RouteFor(e->bundle));
+        memcpy(e->bundle, bundle, sizeof(e->bundle));
+        atomic_store(&e->target, target);
         gClientCount++;
     }
+    os_unfair_lock_unlock(&gClientsLock);
     pthread_mutex_unlock(&gMutex);
     return 0;
 }
@@ -282,9 +310,10 @@ static OSStatus RemoveDeviceClient(AudioServerPlugInDriverRef d, AudioObjectID o
     (void)d;
     if (!c) return 0;
     pthread_mutex_lock(&gMutex);
+    os_unfair_lock_lock(&gClientsLock);
     for (UInt32 i = 0; i < gClientCount; i++) {
         if (gClients[i].device == o && gClients[i].client == c->mClientID) {
-            // Keep the IO thread safe: move the last entry here (targets of other entries stay valid).
+            // Move the last entry here.
             gClients[i].device = gClients[gClientCount - 1].device;
             gClients[i].client = gClients[gClientCount - 1].client;
             memcpy(gClients[i].bundle, gClients[gClientCount - 1].bundle, sizeof(gClients[i].bundle));
@@ -293,6 +322,7 @@ static OSStatus RemoveDeviceClient(AudioServerPlugInDriverRef d, AudioObjectID o
             break;
         }
     }
+    os_unfair_lock_unlock(&gClientsLock);
     pthread_mutex_unlock(&gMutex);
     return 0;
 }
@@ -338,10 +368,11 @@ static OSStatus PlugInSize(const AudioObjectPropertyAddress* a, UInt32* s) {
         case kAudioObjectPropertyOwnedObjects: case kAudioPlugInPropertyDeviceList: *s = PublishedCount() * sizeof(AudioObjectID); return 0;
         case kAudioPlugInPropertyTranslateUIDToDevice: *s = sizeof(AudioObjectID); return 0;
         case kAudioPlugInPropertyBoxList: *s = 0; return 0;
-        case kAudioObjectPropertyCustomPropertyInfoList: *s = 3 * sizeof(AudioServerPlugInCustomPropertyInfo); return 0;
+        case kAudioObjectPropertyCustomPropertyInfoList: *s = 4 * sizeof(AudioServerPlugInCustomPropertyInfo); return 0;
         case kRouteSelector: *s = sizeof(CFStringRef); return 0;
         case kVisibleSelector: *s = sizeof(CFNumberRef); return 0;
         case kNamesSelector: *s = sizeof(CFStringRef); return 0;
+        case kDebugSelector: *s = sizeof(CFStringRef); return 0;
     }
     return kAudioHardwareUnknownPropertyError;
 }
@@ -424,12 +455,31 @@ static OSStatus GetPropertyData(AudioServerPlugInDriverRef inDriver, AudioObject
             }
             case kAudioPlugInPropertyBoxList: *outDataSize = 0; return 0;
             case kAudioObjectPropertyCustomPropertyInfoList: {
-                if (inDataSize < 3 * sizeof(AudioServerPlugInCustomPropertyInfo)) return kAudioHardwareBadPropertySizeError;
+                if (inDataSize < 4 * sizeof(AudioServerPlugInCustomPropertyInfo)) return kAudioHardwareBadPropertySizeError;
                 AudioServerPlugInCustomPropertyInfo* info = outData;
                 info[0] = (AudioServerPlugInCustomPropertyInfo){ kRouteSelector, kAudioServerPlugInCustomPropertyDataTypeCFString, kAudioServerPlugInCustomPropertyDataTypeNone };
                 info[1] = (AudioServerPlugInCustomPropertyInfo){ kVisibleSelector, kAudioServerPlugInCustomPropertyDataTypeCFPropertyList, kAudioServerPlugInCustomPropertyDataTypeNone };
                 info[2] = (AudioServerPlugInCustomPropertyInfo){ kNamesSelector, kAudioServerPlugInCustomPropertyDataTypeCFString, kAudioServerPlugInCustomPropertyDataTypeNone };
-                *outDataSize = 3 * sizeof(AudioServerPlugInCustomPropertyInfo);
+                info[3] = (AudioServerPlugInCustomPropertyInfo){ kDebugSelector, kAudioServerPlugInCustomPropertyDataTypeCFString, kAudioServerPlugInCustomPropertyDataTypeNone };
+                *outDataSize = 4 * sizeof(AudioServerPlugInCustomPropertyInfo);
+                return 0;
+            }
+            case kDebugSelector: {
+                if (inDataSize < sizeof(CFStringRef)) return kAudioHardwareBadPropertySizeError;
+                CFMutableStringRef m = CFStringCreateMutable(NULL, 0);
+                CFStringAppendFormat(m, NULL, CFSTR("processOutput=%llu routed=%llu notRead=%llu\nrunning:"),
+                                     atomic_load(&gDbgProcessOutput), atomic_load(&gDbgRouted), atomic_load(&gDbgNotRead));
+                for (UInt32 i = 0; i < kDeviceCount; i++) if (gIOCount[i]) CFStringAppendFormat(m, NULL, CFSTR(" %s(%u)"), kDevices[i].uid, gIOCount[i]);
+                pthread_mutex_lock(&gMutex);
+                os_unfair_lock_lock(&gClientsLock);
+                for (UInt32 i = 0; i < gClientCount; i++) {
+                    int di = DeviceIndex(gClients[i].device);
+                    CFStringAppendFormat(m, NULL, CFSTR("\nclient %u %s on %s -> %d"), gClients[i].client, gClients[i].bundle,
+                                         di >= 0 ? kDevices[di].uid : "?", atomic_load(&gClients[i].target));
+                }
+                os_unfair_lock_unlock(&gClientsLock);
+                pthread_mutex_unlock(&gMutex);
+                *(CFStringRef*)outData = m; *outDataSize = sizeof(CFStringRef);
                 return 0;
             }
             case kNamesSelector: {
@@ -668,7 +718,12 @@ static OSStatus StopIO(AudioServerPlugInDriverRef inDriver, AudioObjectID obj, U
     if (gIOCount[d] > 0 && --gIOCount[d] == 0) {
         if (gRunningDevices > 0) gRunningDevices--;
         if (!kDevices[d].input) memset(gRings[kDevices[d].pair], 0, kRingFrames * kChannels * sizeof(float));
-        else memset(gSide[kDevices[d].pair], 0, kRingFrames * kChannels * sizeof(float));
+        else {
+            int p = kDevices[d].pair;
+            os_unfair_lock_lock(&gSideLock[p]);
+            memset(gSide[p], 0, kRingFrames * kChannels * sizeof(float));
+            os_unfair_lock_unlock(&gSideLock[p]);
+        }
     }
     pthread_mutex_unlock(&gMutex);
     return 0;
@@ -710,14 +765,21 @@ static OSStatus DoIOOperation(AudioServerPlugInDriverRef inDriver, AudioObjectID
     float* buf = mainBuffer;
     if (op == kAudioServerPlugInIOOperationProcessOutput) {
         // One client's audio before the device mix: move it to the pair it is routed to.
+        atomic_fetch_add(&gDbgProcessOutput, 1);
         int target = ClientTarget(obj, client);
         if (target < 0 || target == kDevices[d].pair) return 0;
+        // Nobody drains the target pair (its bridge is stopped): the audio would pile up, keep it where it is.
+        bool read = PairIsRead(target);
+        if (!read) { atomic_fetch_add(&gDbgNotRead, 1); return 0; }
+        atomic_fetch_add(&gDbgRouted, 1);
         float* side = gSide[target];
         UInt64 start = (UInt64)cycle->mOutputTime.mSampleTime;
+        os_unfair_lock_lock(&gSideLock[target]);
         for (UInt32 f = 0; f < frames; f++) {
             UInt32 idx = (UInt32)((start + f) & (kRingFrames - 1)) * kChannels;
             for (UInt32 c = 0; c < kChannels; c++) side[idx + c] += buf[f * kChannels + c];
         }
+        os_unfair_lock_unlock(&gSideLock[target]);
         memset(buf, 0, frames * kChannels * sizeof(float));
         return 0;
     }
@@ -729,14 +791,17 @@ static OSStatus DoIOOperation(AudioServerPlugInDriverRef inDriver, AudioObjectID
         }
     } else if (op == kAudioServerPlugInIOOperationReadInput) {
         UInt64 start = (UInt64)cycle->mInputTime.mSampleTime;
+        int p = kDevices[d].pair;
+        float* side = gSide[p];
+        os_unfair_lock_lock(&gSideLock[p]);
         for (UInt32 f = 0; f < frames; f++) {
             UInt32 idx = (UInt32)((start + f) & (kRingFrames - 1)) * kChannels;
-            float* side = gSide[kDevices[d].pair];
             for (UInt32 c = 0; c < kChannels; c++) {
                 buf[f * kChannels + c] = ring[idx + c] + side[idx + c];
                 ring[idx + c] = 0; side[idx + c] = 0;
             }
         }
+        os_unfair_lock_unlock(&gSideLock[p]);
     }
     return 0;
 }
