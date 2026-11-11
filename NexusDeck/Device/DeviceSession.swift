@@ -135,6 +135,8 @@ final class DeviceSession {
             introUntil = Date().addingTimeInterval(Double(intro.count) * PanelIntro.interval + PanelIntro.hold + 0.3)
             Task.detached { c.pushNow(intro, interval: PanelIntro.interval) }
             c.send(AXProtocol.levelMeters(true))
+            // Knobs drive Creator, unlinked: set it before the first full sync.
+            c.send(AXProtocol.knobControl(mixer: 0, linked: false))
             audio.applyAll()
             // Let the device apply the volumes before following the knobs again.
             try? await Task.sleep(for: .seconds(1.5))

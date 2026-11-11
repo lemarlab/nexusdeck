@@ -35,11 +35,14 @@ final class AudioService: ObservableObject {
     func applyMixer() {
         guard let c = controller else { return }
         let p = store.mixer
+        // The knobs drive the Creator mix, unlinked: send it before the volumes so a firmware reset does not
+        // leave them on the Audience bus.
+        c.send(AXProtocol.knobControl(mixer: 0, linked: false))
         for bus in MixBus.allCases {
             if bus == .audience {
                 // Audience is an internal Line In bus: the physical Line In at unity (its knob is applied to
                 // the OBS copy), every other channel silent through the volume registers, never the mute bits.
-                c.send(AXProtocol.mixerVolumes(mixer: 1, values: [0, AXProtocol.mixerVolumeMax, 0, 0, 0, 0]))
+                c.send(Self.audienceRow())
                 continue
             }
             let mix = p.mixes[.creator] ?? MixState()
@@ -50,10 +53,31 @@ final class AudioService: ObservableObject {
             c.send(AXProtocol.mixerVolumes(mixer: bus.rawValue, values: values))
         }
         c.send(AXProtocol.mixerMutes(muteMasks()))
-        c.send(AXProtocol.knobControl(mixer: 0, linked: false))
         // The monitor overrides the mic volume in some mixes: re-apply it after the volumes.
         applyMic()
         if ducked || duckAmount > 0 { applyDucking(force: true) } else { sentDuckSteps = [:] }
+    }
+
+    /// Audience is an internal Line In bus: the physical Line In at unity, every other channel at 0
+    /// (through the volume registers). Written on every full mixer sync.
+    static func audienceRow() -> AXProtocol.Command {
+        AXProtocol.mixerVolumes(mixer: 1, values: [0, AXProtocol.mixerVolumeMax, 0, 0, 0, 0])
+    }
+
+    private var audienceRowWork: DispatchWorkItem?
+
+    /// The firmware can rewrite the Audience mix after a Mic-knob move or a mic register write: the Line-In-only
+    /// row is sent again, coalesced so a knob turn does not flood the command queue.
+    private func scheduleAudienceRow() {
+        audienceRowWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let c = self.controller else { return }
+                c.send(Self.audienceRow())
+            }
+        }
+        audienceRowWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: w)
     }
 
     // MARK: Mic state per output
@@ -253,9 +277,10 @@ final class AudioService: ObservableObject {
         guard let c = controller else { return }
         let p = store.mixer
         // Register 0x20, as the reference app (Ax310Dealer::initKnob → setMicMode):
-        // bit0 phantom power, bits 1/2 = Creator/Audience mix get the mic WITH effects (always on),
-        // bit3 = Chat Mic with effects (setting), bit4 = 6.3 mm jack input.
-        var cfg: UInt8 = (p.phantom48V ? 0x01 : 0) | 0x02 | 0x04
+        // bit0 phantom power, bit1 = Creator mix gets the mic WITH effects (always on), bit2 = Audience mix:
+        // cleared, the Audience bus is Line-In-only now. bit3 = Chat Mic with effects (setting),
+        // bit4 = 6.3 mm jack input.
+        var cfg: UInt8 = (p.phantom48V ? 0x01 : 0) | 0x02
         if store.library.device.chatMicWithEffects { cfg |= 0x08 }
         if p.micInput == .jack63 { cfg |= 0x10 }
         c.send(AXProtocol.micConfig(cfg))
@@ -266,12 +291,14 @@ final class AudioService: ObservableObject {
         //   to the headphones without the firmware re-syncing the mic (0x12 = monitor on).
         // The mic ring is drawn by the firmware.
         // As enableMonitor in the reference app: a muted mic is treated like monitor off (nothing in the headphones).
-        // 0x22 = 0x01 permanently (verified): the Chat Mic mix is not heard in the headphones and the firmware
-        // does not re-sync the mic, so each output's mic mute can be set freely.
+        // 0x22 = 0x01 permanently: the Chat Mic mix is not heard in the headphones and the firmware does not
+        // re-sync the mic. NOTE: unverified on hardware against PROTOCOL.md (0x31 cut / 0x12 restore); kept as is.
         c.sendInOrder([AXProtocol.micMonitor(mixer: 1, sync: 0),
                        AXProtocol.headphoneSource(0),
                        AXProtocol.mixerMutes(muteMasks())].map { var x = $0; x.preDelayMs = 0; return x })
         c.send(AXProtocol.preampGain(MicGain.register(effectiveGainDB)))
+        // A mic register write can make the firmware touch the Audience mix: restore its Line-In-only row.
+        scheduleAudienceRow()
         ledManager.update()  // also when nothing was written (cleanup switched on or off)
     }
 
@@ -495,6 +522,8 @@ final class AudioService: ObservableObject {
         let ch = MixerChannel.allCases[index]
         let level = Self.ui(hwValue)
         store.mixer.mixes[.creator, default: MixState()].channels[ch, default: ChannelState()].level = level
+        // The firmware copies mic knob moves to the Audience mix: applyMic re-sends its Line-In-only row
+        // (coalesced), the other channels cannot touch mixer 1.
         if ch == .mic { applyMic() }
     }
 
@@ -541,7 +570,8 @@ final class AudioService: ObservableObject {
         lastMeterPublish = now
         var newMeters = meters
         var newOut = outputMeters
-        for bus in MixBus.allCases {
+        // Only the Creator mix is shown: the Audience bus is internal (Line In only).
+        for bus in [MixBus.creator] {
             let mix = store.mixer.mixes[.creator] ?? MixState()
             var m: [MixerChannel: Int] = [:]
             for (k, ch) in MixerChannel.allCases.enumerated() {
