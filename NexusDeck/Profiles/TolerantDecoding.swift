@@ -114,7 +114,7 @@ extension MixerProfile {
         channelIcons = c.v("channelIcons", [:])
         ducking = c.v("ducking", Ducking())
         screamGuard = c.v("screamGuard", ScreamGuard())
-        obsTracks = c.v("obsTracks", false)
+        // "obsTracks" is no longer stored: the mode is always on (old values are ignored).
     }
 }
 

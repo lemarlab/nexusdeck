@@ -492,12 +492,6 @@ final class AudioService: ObservableObject {
         applyMic()
     }
 
-    func setOBSTracks(_ on: Bool) {
-        store.mixer.obsTracks = on
-        if on { store.mixer.activeMix = .creator }
-        applyMixer()
-    }
-
     /// Gain (0…1) of a channel's OBS copy: follows its knob, mute and stream routing like the mixer does.
     func captureGain(_ ch: MixerChannel) -> Float {
         let p = store.mixer

@@ -84,9 +84,10 @@ struct MixerProfile: Codable, Identifiable, Hashable {
     var channelIcons: [String: String] = [:]
     var ducking = Ducking()
     var screamGuard = ScreamGuard()
-    /// OBS tracks mode: the Audience mix carries the physical Line In only (it becomes "Line In (OBS)"),
-    /// every source reaches OBS on its own capture input.
-    var obsTracks = false
+    /// OBS tracks mode, always on: the Audience mix carries the physical Line In only (it becomes
+    /// "Line In (OBS)"), every source (mic included) reaches OBS/streaming on its own capture input.
+    /// Computed so that saved profiles with `obsTracks: false` are ignored (tolerant decoding never fails).
+    var obsTracks: Bool { true }
 
     func isRouted(_ ch: MixerChannel, to out: RouteOutput) -> Bool { routes["\(out.rawValue).\(ch.rawValue)"] ?? true }
     func name(_ ch: MixerChannel) -> String {
