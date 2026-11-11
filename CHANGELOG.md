@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0 — 2026-11-11
+
+### Fixed
+- The mic no longer leaks into [AM-IN] Line In. Root cause: register 0x22 (mic monitor routing | mix sync) was set to 0x12 in 0.5.0, enabling mix sync — the firmware copied the Creator mic level into the Audience bus that feeds Line In. Now 0x00 (monitor via Creator, no sync); monitor off still 0x31.
+- The mic knob now changes your own voice level in the headphone monitor again.
+- On connect, mix sync is disabled before the Audience bus levels are written, and the app re-checks that the Audience mic is 0 (after connect and after mic knob turns), re-sending only if needed.
+
 ## 0.5.0 — 2026-11-11
 
 ### New
