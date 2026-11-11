@@ -425,6 +425,22 @@ final class AudioBridge: ObservableObject {
                 vDSP_vsma(sp + sc, vDSP_Stride(sStride), &gain, dp + dc, vDSP_Stride(dStride), dp + dc, vDSP_Stride(dStride), vDSP_Length(frames))
             }
         }
+        // Soft limiter on the [AM-IN] Line In capture route only (RT-safe, no alloc/lock).
+        for i in 0..<Int(plan.pointee.count) {
+            let r = routes[i]
+            guard r.gain == Int32(Gain.capLineInHW.rawValue), Int(r.dstBuffer) < outs.count,
+                  let dp = outs[Int(r.dstBuffer)].mData?.assumingMemoryBound(to: Float.self) else { continue }
+            let stride = max(Int(outs[Int(r.dstBuffer)].mNumberChannels), 1)
+            let frames = Int(outs[Int(r.dstBuffer)].mDataByteSize) / 4 / stride
+            let denom = tanhf(1.5)
+            for f in 0..<frames {
+                for c in 0..<stride {
+                    let idx = f * stride + c
+                    let x = dp[idx]
+                    dp[idx] = tanhf(x * 1.5) / denom
+                }
+            }
+        }
         micPeak(plan, ins)
         voice(plan, ins, outs)
     }

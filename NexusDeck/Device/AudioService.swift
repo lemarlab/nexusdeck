@@ -22,6 +22,10 @@ final class AudioService: ObservableObject {
         ledManager.service = self
     }
 
+    /// Measured 2026-11-11: Audience→USB path (Line In) sits ~7.5 dB below the Creator mix for the same source,
+    /// so the OBS copy needs this compensation to match headphone balance.
+    static let lineInOBSCompensationDB: Double = 7.5
+    static let lineInOBSCompensation: Float = Float(pow(10, 7.5 / 20.0))
     static func hw(_ level: Int) -> Int { Int((Double(level) / 100 * Double(AXProtocol.mixerVolumeMax)).rounded()) }
     static func ui(_ hw: Int) -> Int { min(100, hw * 100 / AXProtocol.mixerVolumeMax) }
 

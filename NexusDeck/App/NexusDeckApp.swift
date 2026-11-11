@@ -177,7 +177,8 @@ final class AppState: ObservableObject {
             bridge.setGain(.capLineIn, audio.captureGain(.lineIn))
             bridge.setGain(.capConsole, audio.captureGain(.console))
             // The Audience mix carries the physical Line In at unity: only the knob's share is added here.
-            bridge.setGain(.capLineInHW, audio.captureGain(.lineIn) * 32768 / Float(AudioService.meterGain[20]))
+            // Compensate the measured ~7.5 dB deficit of the Audience→USB path (see AudioService.lineInOBSCompensationDB).
+            bridge.setGain(.capLineInHW, audio.captureGain(.lineIn) * 32768 / Float(AudioService.meterGain[20]) * AudioService.lineInOBSCompensation)
         }
         engine.startIntegrations()
         SDKHost.shared.start(store: store, deck: deck)
