@@ -176,8 +176,11 @@ final class AppState: ObservableObject {
             bridge.setGain(.capChat, audio.captureGain(.chat))
             bridge.setGain(.capLineIn, audio.captureGain(.lineIn))
             bridge.setGain(.capConsole, audio.captureGain(.console))
-            // The Audience mix carries the physical Line In at unity: only the knob's share is added here.
-            bridge.setGain(.capLineInHW, audio.captureGain(.lineIn) * 32768 / Float(AudioService.meterGain[20]))
+            // The Audience mix carries the physical Line In at ~unity gain (hardware step 20 ≈ 0 dB, no
+            // extra attenuation), so its OBS copy follows the same law as every other channel: the knob's
+            // gain from captureGain, applied directly. No normalization by meterGain[20] (that assumed the
+            // hardware path was at meterGain[20]/32768, i.e. double-scaled an already-unity signal).
+            bridge.setGain(.capLineInHW, audio.captureGain(.lineIn))
         }
         engine.startIntegrations()
         SDKHost.shared.start(store: store, deck: deck)
