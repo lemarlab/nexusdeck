@@ -303,9 +303,9 @@ final class AudioService: ObservableObject {
         scheduleAudienceMicCheck(after: .milliseconds(1500))  // 0x22 may have changed
     }
 
-    /// Register 0x22: 0x00 (Creator, sync 0) with the monitor on, 0x31 with it off (see applyMic).
+    /// Register 0x22: 0x02 (Chat Mic, sync 0; CANDIDATE, pending test: 0x00 left [AM-IN] Chat Mic silent) with the monitor on, 0x31 with it off (see applyMic).
     private func micMonitorCommand() -> AXProtocol.Command {
-        hearsMic ? AXProtocol.micMonitor(mixer: 0, sync: 0) : AXProtocol.micMonitor(mixer: 1, sync: 3)
+        hearsMic ? AXProtocol.micMonitor(mixer: 2, sync: 0) : AXProtocol.micMonitor(mixer: 1, sync: 3)
     }
 
     private var audienceMicCheck: Task<Void, Never>?
