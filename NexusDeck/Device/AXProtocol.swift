@@ -14,6 +14,8 @@ enum AXProtocol {
         var bytes: [UInt8]
         var preDelayMs = 0
         var async = false
+        /// Sent even when the register cache holds the same payload (the firmware changed it on its own).
+        var bypassCache = false
 
         var interDelayMs: Int {
             if bytes[0] == 0xFE { return [0x87, 0x88, 0xA3].contains(bytes[3]) ? 50 : 200 }

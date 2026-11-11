@@ -108,7 +108,7 @@ final class AXController {
             let len = Int(b[3])
             if 4 + len <= b.count {
                 let p = Array(b[4..<(4 + len)])
-                if lastWrite[b[2]] == p { return nil }
+                if !cmd.bypassCache, lastWrite[b[2]] == p { return nil }
                 payload = p
             }
         }
