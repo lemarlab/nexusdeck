@@ -10,7 +10,11 @@ final class AudioService: ObservableObject {
     let store: ProfileStore
     let ledManager = LEDManager()
     var controller: AXController? {
-        didSet { if controller == nil { ledManager.detach() } }
+        didSet {
+            // Attach / detach: the next writes must reach the device even if they look unchanged.
+            controller?.invalidateWriteCache()
+            if controller == nil { ledManager.detach() }
+        }
     }
 
     init(store: ProfileStore) {
@@ -59,25 +63,10 @@ final class AudioService: ObservableObject {
     }
 
     /// Audience is an internal Line In bus: the physical Line In at unity, every other channel at 0
-    /// (through the volume registers). Written on every full mixer sync.
+    /// (through the volume registers). Sent on a full mixer sync (attach / resync): the controller skips it
+    /// when the payload did not change.
     static func audienceRow() -> AXProtocol.Command {
         AXProtocol.mixerVolumes(mixer: 1, values: [0, AXProtocol.mixerVolumeMax, 0, 0, 0, 0])
-    }
-
-    private var audienceRowWork: DispatchWorkItem?
-
-    /// The firmware can rewrite the Audience mix after a Mic-knob move or a mic register write: the Line-In-only
-    /// row is sent again, coalesced so a knob turn does not flood the command queue.
-    private func scheduleAudienceRow() {
-        audienceRowWork?.cancel()
-        let w = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, let c = self.controller else { return }
-                c.send(Self.audienceRow())
-            }
-        }
-        audienceRowWork = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: w)
     }
 
     // MARK: Mic state per output
@@ -297,8 +286,6 @@ final class AudioService: ObservableObject {
                        AXProtocol.headphoneSource(0),
                        AXProtocol.mixerMutes(muteMasks())].map { var x = $0; x.preDelayMs = 0; return x })
         c.send(AXProtocol.preampGain(MicGain.register(effectiveGainDB)))
-        // A mic register write can make the firmware touch the Audience mix: restore its Line-In-only row.
-        scheduleAudienceRow()
         ledManager.update()  // also when nothing was written (cleanup switched on or off)
     }
 
@@ -522,9 +509,9 @@ final class AudioService: ObservableObject {
         let ch = MixerChannel.allCases[index]
         let level = Self.ui(hwValue)
         store.mixer.mixes[.creator, default: MixState()].channels[ch, default: ChannelState()].level = level
-        // The firmware copies mic knob moves to the Audience mix: applyMic re-sends its Line-In-only row
-        // (coalesced), the other channels cannot touch mixer 1.
-        if ch == .mic { applyMic() }
+        // The firmware has already applied the knob (volume, ring, and for the mic its own audience copy): no
+        // HID write here, a register write would make it reset and redraw the rings. The knobs drive the
+        // Creator mix unlinked, so mixer 1 cannot change and nothing in the app follows the mic fader.
     }
 
     /// A mixer knob was pressed: its channel mute flips in the Creator mix.

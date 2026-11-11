@@ -169,6 +169,7 @@ final class LEDManager {
     func reassert() {
         guard isAttached else { return }
         sent = LEDScene()
+        controller?.invalidateWriteCache()
         scheduleFlush(force: true)
     }
 

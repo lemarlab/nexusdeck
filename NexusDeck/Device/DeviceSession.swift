@@ -174,6 +174,7 @@ final class DeviceSession {
                 if await audio.verifyDeviceState() { break }
                 SDKHost.shared.debugLog("Startup check: mixer out of sync, sending the profile again (\(attempt + 1))")
                 ignoreKnobsUntil = .distantFuture
+                c.invalidateWriteCache()  // full resend: the register cache must not skip anything
                 audio.applyAll()
                 audio.ledManager.reassert()
                 try? await Task.sleep(for: .seconds(1.5))

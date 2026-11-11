@@ -84,11 +84,39 @@ final class AXController {
     /// Last mute masks written: a volume write unmutes the channel on the device, so they are re-sent after it.
     private var lastMutes: AXProtocol.Command?
 
+    /// Last payload written per register (accessed only on `commandQueue`). The firmware owns these values (a
+    /// knob turn applies the volume in hardware) and an identical write only makes it reset and redraw the
+    /// knob rings, so unchanged config / monitor / mute / preamp / mixer writes are not sent at all.
+    private var lastWrite: [UInt8: [UInt8]] = [:]
+
+    /// Registers whose writes are skipped when the payload did not change. LED registers stay out: they are
+    /// re-sent on purpose (the firmware drops the first ones after a restart).
+    private static func isCached(_ register: UInt8) -> Bool {
+        [0x11, 0x15, 0x1F, 0x20, 0x22].contains(register) || (0x27...0x3A).contains(register)
+    }
+
+    /// Forgets the payloads written so far, so the next writes reach the device: called on attach / detach and
+    /// when the mixer was found out of sync (full resend).
+    func invalidateWriteCache() {
+        commandQueue.async { self.lastWrite.removeAll() }
+    }
+
     private func perform(_ cmd: AXProtocol.Command) -> [UInt8]? {
-        let reply = performRaw(cmd)
         let b = cmd.bytes
+        var payload: [UInt8]?
+        if b.count > 4, b[0] == 0x01, b[1] == 0x10, Self.isCached(b[2]) {
+            let len = Int(b[3])
+            if 4 + len <= b.count {
+                let p = Array(b[4..<(4 + len)])
+                if lastWrite[b[2]] == p { return nil }
+                payload = p
+            }
+        }
+        let reply = performRaw(cmd)
+        if let payload, reply != nil { lastWrite[b[2]] = payload }
         if b.count > 2, b[0] == 0x01, b[1] == 0x10 {
             if b[2] == 0x11 { lastMutes = cmd }
+            // A volume write unmutes the channel: the mutes go again, but only after a write that was sent.
             else if (0x27...0x3A).contains(b[2]), let m = lastMutes { _ = performRaw(m) }
         }
         return reply
