@@ -347,7 +347,8 @@ final class AudioService: ObservableObject {
         c.sendInOrder(cmds)
     }
 
-    /// Voice changer: gain of the filtered voice sent back to the mixer (heard in headphones / on stream).
+    /// Voice changer: gain of the filtered voice for a future monitor return. Currently inert: the bridge keeps
+    /// the processed voice out of the mixer's Chat channel (no headphone monitoring).
     var voiceReturnGain: Float {
         guard store.dsp.softwareVoiceActive else { return 0 }
         return hearsMic || micInStream ? 1 : 0

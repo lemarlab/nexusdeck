@@ -56,10 +56,16 @@ final class AudioBridge: ObservableObject {
         var count: Int32
         var gains: UnsafeMutablePointer<Float>
         var routes: UnsafeMutablePointer<Route>
-        /// Voice changer: Chat Mic input (USB in 5-6), Chat Mic device (bridge), Chat channel to the mixer (USB out 5-6).
+        /// Voice changer: Chat Mic input (USB in 5-6), Chat Mic device (bridge), optional monitor return.
         var fxIn: (Route, Route) = (Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0), Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0))
         var fxToChatMic: (Route, Route) = (Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0), Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0))
+        /// Return of the processed voice to the mixer. Currently disabled: it used to feed the Chat channel
+        /// (USB out 5-6), which is audible in the headphones. See `chatReturnEnabled`.
         var fxToMixer: (Route, Route) = (Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0), Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0))
+        /// Off: software voice FX are published on the Chat Mic device only (OBS mic track), never monitored
+        /// in the headphones. A future "Voicemod → Monitor" route must not reuse the Chat channel: add a
+        /// dedicated monitor target and enable it here.
+        var chatReturnEnabled = false
         var fx: UnsafeMutablePointer<VoiceFX.State>
         var scratch: UnsafeMutablePointer<Float>
         /// Peak of the mic (Chat Mic input) since the main thread last read it.
@@ -77,8 +83,8 @@ final class AudioBridge: ObservableObject {
         return v
     }
 
-    /// Selects the voice (0 = off). The filtered voice replaces the mic on Chat Mic and is sent back to the
-    /// mixer on the Chat channel, so it is heard in the headphones and on stream.
+    /// Selects the voice (0 = off). The filtered voice replaces the mic on the Chat Mic device, so the stream /
+    /// virtual mic (OBS) gets it. It is not returned to the mixer's Chat channel: no headphone monitoring.
     /// Voice cleanup stages (they run before the voice).
     func setCleanup(lowCut: Bool, noise: Bool, deEss: Bool) {
         voiceState.pointee.cleanLowCut = lowCut
@@ -435,8 +441,9 @@ final class AudioBridge: ObservableObject {
         if peak > plan.pointee.micPeak.pointee { plan.pointee.micPeak.pointee = peak }
     }
 
-    /// Voice changer: mono mic from the Chat Mic input → effects → Chat Mic device (replacing the clean voice)
-    /// and added to the Chat channel going back to the mixer.
+    /// Voice changer: mono mic from the Chat Mic input → effects → Chat Mic device (replacing the clean voice).
+    /// The processed voice is published on that device only (the virtual mic OBS captures): it is never added
+    /// to the mixer's Chat channel, so it is not heard in the headphones.
     nonisolated private static func voice(_ plan: UnsafeMutablePointer<RoutePlan>, _ ins: UnsafeMutableAudioBufferListPointer, _ outs: UnsafeMutableAudioBufferListPointer) {
         let pl = plan.pointee
         guard pl.fx.pointee.voice > 0 || VoiceFX.cleaning(pl.fx), pl.fxIn.0.srcBuffer >= 0, pl.fxIn.1.srcBuffer >= 0 else { return }
@@ -455,7 +462,10 @@ final class AudioBridge: ObservableObject {
             for f in 0..<min(frames, o.2) { o.0[f * o.1] = buf[f] }
         }
         let k = pl.fx.pointee.returnGain
-        guard k > 0 else { return }
+        // No return to the mixer's Chat channel: it is audible in the headphones (Creator/Audience mixes),
+        // and the software FX must stay out of them (headphone monitoring = the mixer's hardware Monitor only).
+        // Kept as the hook for a future "Voicemod → Monitor" route (a dedicated target, never the Chat channel).
+        guard pl.chatReturnEnabled, k > 0 else { return }
         for target in [pl.fxToMixer.0, pl.fxToMixer.1] {
             guard let o = ptr(outs, target) else { continue }
             for f in 0..<min(frames, o.2) { o.0[f * o.1] += buf[f] * k }
