@@ -279,12 +279,15 @@ final class AudioService: ObservableObject {
         c.send(AXProtocol.micConfig(cfg))
         // Monitor (hearing your own mic in the headphones), verified on the device (PROTOCOL.md §Mic routing):
         // - the headphones listen to the Creator mix (register 0x15 = 0) and to the Chat Mic mix;
-        // - register 0x22 = 0x12 restores the Chat Mic → headphones path (monitor on); 0x22 = 0x31 cuts it
+        // - register 0x22 = mic | sync<<4. Monitor on = 0x01; 0x22 = 0x31 cuts the Chat Mic → headphones path
         //   (hardware-verified, read back as 0x33) while the Chat Mic USB output keeps the voice;
+        // - sync = 1 (the former 0x12) makes the firmware copy the Creator mic volume into the Audience mix (and
+        //   clears the Audience mic mute), which leaked the voice into [AM-IN] Line In; sync = 0 (0x01) keeps the
+        //   Audience mic at 0. Verified by register read-back and user listening test 2026-11-11;
         // - host writes of the mic bit in 0x12 are ignored: the firmware owns the Mic knob mute in Audience.
         // Monitor off (incl. a muted/routed-away mic, as enableMonitor in the reference app) = the Creator mic
         // bit in the mute masks + 0x22 = 0x31. The mic ring is drawn by the firmware.
-        c.sendInOrder([AXProtocol.micMonitor(mixer: hearsMic ? 2 : 1, sync: hearsMic ? 1 : 3),
+        c.sendInOrder([AXProtocol.micMonitor(mixer: 1, sync: hearsMic ? 0 : 3),
                        AXProtocol.headphoneSource(0),
                        AXProtocol.mixerMutes(muteMasks())].map { var x = $0; x.preDelayMs = 0; return x })
         c.send(AXProtocol.preampGain(MicGain.register(effectiveGainDB)))
