@@ -55,6 +55,8 @@ final class AudioService: ObservableObject {
                 // Audience is an internal Line In bus: the physical Line In at unity (its knob is applied to
                 // the OBS copy), every other channel silent through the volume registers, never the mute bits.
                 c.send(Self.audienceRow())
+                // With sync off the firmware no longer copies the mic into the Chat Mic mix: written explicitly.
+                c.send(Self.chatMicRow())
                 continue
             }
             let mix = p.mixes[.creator] ?? MixState()
@@ -74,6 +76,11 @@ final class AudioService: ObservableObject {
     /// Audience is an internal Line In bus: the physical Line In at unity, every other channel at 0
     /// (through the volume registers). Sent on a full mixer sync (attach / resync): the controller skips it
     /// when the payload did not change.
+    /// Chat Mic mix (mixer 2, 0x35…): the mic at unity, nothing else (feeds USB in 5-6 / [AM-IN] Chat Mic).
+    static func chatMicRow() -> AXProtocol.Command {
+        AXProtocol.mixerVolumes(mixer: 2, values: [AXProtocol.mixerVolumeMax, 0, 0, 0, 0, 0])
+    }
+
     static func audienceRow() -> AXProtocol.Command {
         AXProtocol.mixerVolumes(mixer: 1, values: [0, AXProtocol.mixerVolumeMax, 0, 0, 0, 0])
     }
@@ -289,6 +296,8 @@ final class AudioService: ObservableObject {
         //   (follows the Creator mic knob, nothing via Audience): verified by user listening test 2026-11-11. 0x01 (via Audience) still
         //   leaked the voice into Line In and ignored the mic knob. 0x22 = 0x31 cuts the Chat Mic → headphones path
         //   (hardware-verified, read back as 0x33) while the Chat Mic USB output keeps the voice;
+        // - with sync off the Chat Mic mix (0x35…, mic = index 0) is no longer fed from the knob: the app writes
+        //   it (mic 20, rest 0). Read-back 2026-11-11: an explicit 0x35 = 0x14 persists with 0x22 = 0x00 / 0x02;
         // - sync = 1 (the former 0x12) makes the firmware copy the Creator mic volume into the Audience mix (and
         //   clears the Audience mic mute), which leaked the voice into [AM-IN] Line In; sync = 0 keeps the Audience
         //   mic volume at 0 (register read-back 2026-11-11);
@@ -303,25 +312,27 @@ final class AudioService: ObservableObject {
         scheduleAudienceMicCheck(after: .milliseconds(1500))  // 0x22 may have changed
     }
 
-    /// Register 0x22: 0x02 (Chat Mic, sync 0; CANDIDATE, pending test: 0x00 left [AM-IN] Chat Mic silent) with the monitor on, 0x31 with it off (see applyMic).
+    /// Register 0x22: 0x00 (Creator, sync 0) with the monitor on, 0x31 with it off (see applyMic).
     private func micMonitorCommand() -> AXProtocol.Command {
-        hearsMic ? AXProtocol.micMonitor(mixer: 2, sync: 0) : AXProtocol.micMonitor(mixer: 1, sync: 3)
+        hearsMic ? AXProtocol.micMonitor(mixer: 0, sync: 0) : AXProtocol.micMonitor(mixer: 1, sync: 3)
     }
 
     private var audienceMicCheck: Task<Void, Never>?
 
-    /// Reads the Audience mic volume (0x2E[0]) after a delay (debounced) and re-sends the Audience row only
+    /// Reads the Audience mic (0x2E[0], want 0) and Chat Mic mic (0x35, want 20) after a delay (debounced); re-sends a row only
     /// when the firmware put the mic back: a write without need would reset the knob rings.
     func scheduleAudienceMicCheck(after delay: Duration) {
         audienceMicCheck?.cancel()
         audienceMicCheck = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled, let c = self.controller else { return }
-            guard let r = await c.transact(AXProtocol.read(0x2E, 1)), r.count > 4, r[4] != 0 else { return }
-            guard !Task.isCancelled, c === self.controller else { return }
-            var row = Self.audienceRow()
-            row.bypassCache = true
-            c.sendInOrder([row])
+            var rows: [AXProtocol.Command] = []
+            if let r = await c.transact(AXProtocol.read(0x2E, 1)), r.count > 4, r[4] != 0 { rows.append(Self.audienceRow()) }
+            if let r = await c.transact(AXProtocol.read(0x35, 1)), r.count > 4, Int(r[4]) != AXProtocol.mixerVolumeMax {
+                rows.append(Self.chatMicRow())
+            }
+            guard !rows.isEmpty, !Task.isCancelled, c === self.controller else { return }
+            c.sendInOrder(rows.map { var x = $0; x.bypassCache = true; return x })
         }
     }
 
