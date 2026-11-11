@@ -1,9 +1,13 @@
 import SwiftUI
 
-/// Gain shown in dB (0...60) and mapped to the preamp register (0...119).
+/// Gain shown in dB (0...60). The preamp register is 1 dB per step (hardware-confirmed),
+/// so register = dB, clamped to 0...maxDB (and never above the register limit 119).
 enum MicGain {
     static let maxDB = 60
-    static func register(_ db: Int) -> Int { Int((Double(max(0, min(maxDB, db))) * 119 / Double(maxDB)).rounded()) }
+    /// Per-input ceiling; vendor profiles cap the preamp per input type. UI max stays 60.
+    static func maxDB(for micType: MicType) -> Int { maxDB }
+    static func register(_ db: Int) -> Int { max(0, min(maxDB, db)) }
+    static func register(_ db: Int, for micType: MicType) -> Int { max(0, min(min(maxDB, maxDB(for: micType)), db)) }
 }
 
 enum MicType: Int, CaseIterable, Identifiable {
