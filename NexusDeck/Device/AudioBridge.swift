@@ -374,7 +374,8 @@ final class AudioBridge: ObservableObject {
             cap(usbIn + 2, 1, .capGame)
             cap(usbIn + 4, 2, .capChat)
             if softCount == 2 {
-                cap(usbIn + 6, 3, .capLineIn)
+                // Line In OBS track is fed only by the hardware Audience path (capLineInHW below);
+                // the soft "Line In" bridge route is intentionally omitted to avoid a duplicate/summed copy.
                 cap(usbIn + 8, 4, .capConsole)
             }
             cap(2, 3, .capLineInHW)   // USB input 3-4 = Audience mix
