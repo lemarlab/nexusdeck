@@ -49,8 +49,10 @@ final class AudioBridge: ObservableObject {
         case capLineInHW
         /// System / Game / Chat sent to the mixer: voice priority applied in software (see AudioService.softDucking).
         case duckSystem, duckGame, duckChat
+        /// [AM-IN] Chat Mic: the mic knob applied in software (the Chat Mic mix mic is fixed at unity, sync off).
+        case chatMic
     }
-    static let gainCount = 12
+    static let gainCount = 13
     static let maxRoutes = 64
     struct RoutePlan {
         var count: Int32
@@ -72,6 +74,8 @@ final class AudioBridge: ObservableObject {
         var scratch: UnsafeMutablePointer<Float>
         /// Peak of the mic (Chat Mic input) since the main thread last read it.
         var micPeak: UnsafeMutablePointer<Float>
+        /// Smoothed [AM-IN] Chat Mic gain (IO thread only), ramping toward gains[chatMic] in about 20 ms.
+        var chatGainCur: Float = 1
     }
     /// Voice changer (shared with the IO thread).
     private let voiceState = VoiceFX.makeState()
@@ -98,7 +102,7 @@ final class AudioBridge: ObservableObject {
         voiceState.pointee.voice = Int32(v)
         voiceState.pointee.returnGain = returnGain
     }
-    private var gainValues: [Float] = [1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1]
+    private var gainValues: [Float] = [1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1]
     private var voiceGainValue: Float = 1
 
     /// Sets the software gains (0…1).
@@ -346,7 +350,9 @@ final class AudioBridge: ObservableObject {
         for pair in 0..<3 {
             for c in 0..<2 {
                 guard let src = locate(inLayout, pair * 2 + c), let dst = locate(outLayout, usbOut + pair * 2 + c) else { return nil }
-                routes.append(Route(srcBuffer: src.0, srcChannel: src.1, dstBuffer: dst.0, dstChannel: dst.1, gain: 0))
+                // Pair 2 = Chat Mic (USB in 5-6): follows the mic knob in software.
+                routes.append(Route(srcBuffer: src.0, srcChannel: src.1, dstBuffer: dst.0, dstChannel: dst.1,
+                                    gain: pair == 2 ? Gain.chatMic.rawValue : 0))
             }
         }
         // Input bridges (after the USB inputs) -> USB outputs 0..5.
@@ -403,6 +409,7 @@ final class AudioBridge: ObservableObject {
         p.initialize(to: RoutePlan(count: Int32(count), gains: gp, routes: rp, fxIn: fxIn, fxToChatMic: fxChat, fxToMixer: fxMix,
                                    fx: voiceState, scratch: voiceScratch, micPeak: micPeakStore))
         p.pointee.voiceGain = voiceGainValue
+        p.pointee.chatGainCur = gainValues[Int(Gain.chatMic.rawValue)]
         return p
     }
 
@@ -413,6 +420,13 @@ final class AudioBridge: ObservableObject {
         for b in outs { if let d = b.mData { memset(d, 0, Int(b.mDataByteSize)) } }
         let g = plan.pointee.gains
         let routes = plan.pointee.routes
+        // [AM-IN] Chat Mic knob gain: one-pole ramp (~20 ms) from the previous value, linear within the buffer.
+        let chatFrom = plan.pointee.chatGainCur
+        let chatTarget = g[Int(Gain.chatMic.rawValue)]
+        let bufFrames = Float(ins.first.map { Int($0.mDataByteSize) / 4 / max(Int($0.mNumberChannels), 1) } ?? 0)
+        let tau = max(plan.pointee.fx.pointee.sampleRate, 1) * 0.02
+        let chatTo = chatFrom + (chatTarget - chatFrom) * min(1, bufFrames / tau)
+        plan.pointee.chatGainCur = chatTo
         do {
             for i in 0..<Int(plan.pointee.count) {
                 let r = routes[i]
@@ -422,6 +436,12 @@ final class AudioBridge: ObservableObject {
                 let sStride = Int(sb.mNumberChannels), dStride = Int(db.mNumberChannels)
                 let frames = min(Int(sb.mDataByteSize) / 4 / max(sStride, 1), Int(db.mDataByteSize) / 4 / max(dStride, 1))
                 let sc = Int(r.srcChannel), dc = Int(r.dstChannel)
+                if r.gain == Gain.chatMic.rawValue {
+                    if chatFrom == 0 && chatTo == 0 { continue }
+                    let step = frames > 1 ? (chatTo - chatFrom) / Float(frames) : 0
+                    for f in 0..<frames { dp[f * dStride + dc] += sp[f * sStride + sc] * (chatFrom + step * Float(f)) }
+                    continue
+                }
                 let k = g[Int(r.gain)]
                 if k == 0 { continue }
                 // dst[f] += src[f] * k on interleaved channels (vectorised).
@@ -449,7 +469,7 @@ final class AudioBridge: ObservableObject {
             }
         }
         micPeak(plan, ins)
-        voice(plan, ins, outs)
+        voice(plan, ins, outs, chatGain: chatTo)
     }
 
     /// Mic peak for the scream protection (Chat Mic input, left channel).
@@ -466,7 +486,7 @@ final class AudioBridge: ObservableObject {
     /// Voice changer: mono mic from the Chat Mic input → effects → Chat Mic device (replacing the clean voice).
     /// The processed voice is published on that device only (the virtual mic OBS captures): it is never added
     /// to the mixer's Chat channel, so it is not heard in the headphones.
-    nonisolated private static func voice(_ plan: UnsafeMutablePointer<RoutePlan>, _ ins: UnsafeMutableAudioBufferListPointer, _ outs: UnsafeMutableAudioBufferListPointer) {
+    nonisolated private static func voice(_ plan: UnsafeMutablePointer<RoutePlan>, _ ins: UnsafeMutableAudioBufferListPointer, _ outs: UnsafeMutableAudioBufferListPointer, chatGain: Float) {
         let pl = plan.pointee
         guard pl.fx.pointee.voice > 0 || VoiceFX.cleaning(pl.fx), pl.fxIn.0.srcBuffer >= 0, pl.fxIn.1.srcBuffer >= 0 else { return }
         func ptr(_ l: UnsafeMutableAudioBufferListPointer, _ r: Route) -> (UnsafeMutablePointer<Float>, Int, Int)? {
@@ -479,7 +499,7 @@ final class AudioBridge: ObservableObject {
         let buf = pl.scratch
         for f in 0..<frames { buf[f] = (l.0[f * l.1] + rr.0[f * rr.1]) * 0.5 }
         VoiceFX.process(pl.fx, buf, frames)
-        let voiceGain = pl.voiceGain
+        let voiceGain = pl.voiceGain * chatGain  // the mic knob applies to the processed voice too
         for target in [pl.fxToChatMic.0, pl.fxToChatMic.1] {
             guard let o = ptr(outs, target) else { continue }
             for f in 0..<min(frames, o.2) { o.0[f * o.1] = buf[f] * voiceGain }
