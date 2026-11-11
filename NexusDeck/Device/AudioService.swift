@@ -273,16 +273,14 @@ final class AudioService: ObservableObject {
         if store.library.device.chatMicWithEffects { cfg |= 0x08 }
         if p.micInput == .jack63 { cfg |= 0x10 }
         c.send(AXProtocol.micConfig(cfg))
-        // Monitor (hearing your own mic in the headphones), verified on the device:
-        // - the headphones listen to the Creator mix (register 0x15 = 0);
-        // - the firmware ties the Mic knob, its ring and its mute to the Audience mix;
-        // - monitor off = mic muted in the Creator mix + register 0x22 = 0x01, which closes the Chat Mic path
-        //   to the headphones without the firmware re-syncing the mic (0x12 = monitor on).
-        // The mic ring is drawn by the firmware.
-        // As enableMonitor in the reference app: a muted mic is treated like monitor off (nothing in the headphones).
-        // 0x22 = 0x01 permanently: the Chat Mic mix is not heard in the headphones and the firmware does not
-        // re-sync the mic. NOTE: unverified on hardware against PROTOCOL.md (0x31 cut / 0x12 restore); kept as is.
-        c.sendInOrder([AXProtocol.micMonitor(mixer: 1, sync: 0),
+        // Monitor (hearing your own mic in the headphones), verified on the device (PROTOCOL.md §Mic routing):
+        // - the headphones listen to the Creator mix (register 0x15 = 0) and to the Chat Mic mix;
+        // - register 0x22 = 0x12 restores the Chat Mic → headphones path (monitor on); 0x22 = 0x31 cuts it
+        //   (hardware-verified, read back as 0x33) while the Chat Mic USB output keeps the voice;
+        // - host writes of the mic bit in 0x12 are ignored: the firmware owns the Mic knob mute in Audience.
+        // Monitor off (incl. a muted/routed-away mic, as enableMonitor in the reference app) = the Creator mic
+        // bit in the mute masks + 0x22 = 0x31. The mic ring is drawn by the firmware.
+        c.sendInOrder([AXProtocol.micMonitor(mixer: hearsMic ? 2 : 1, sync: hearsMic ? 1 : 3),
                        AXProtocol.headphoneSource(0),
                        AXProtocol.mixerMutes(muteMasks())].map { var x = $0; x.preDelayMs = 0; return x })
         c.send(AXProtocol.preampGain(MicGain.register(effectiveGainDB)))

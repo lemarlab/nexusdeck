@@ -109,7 +109,8 @@ enum WriteLog {
     private static let url = ProfileStore.folder.appendingPathComponent("writes.log")
     private static let fmt: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm:ss.SSS"; return f }()
     static func log(_ b: [UInt8]) {
-        guard b.count > 3, b[0] == 0x01 else { return }
+        // 0x01 = register file, 0xFE = MCORE/DSP packets (noise gate 0x9A/0x9E, EQ, compressor…).
+        guard b.count > 3, b[0] == 0x01 || b[0] == 0xFE else { return }
         let line = "\(fmt.string(from: Date())) " + b.prefix(14).map { String(format: "%02x", $0) }.joined(separator: " ") + "\n"
         queue.async {
             if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close() }
