@@ -66,6 +66,8 @@ final class AudioBridge: ObservableObject {
         /// in the headphones. A future "Voicemod → Monitor" route must not reuse the Chat channel: add a
         /// dedicated monitor target and enable it here.
         var chatReturnEnabled = false
+        /// Gain of the processed voice published on the Chat Mic device (0 = muted by the scream guard).
+        var voiceGain: Float = 1
         var fx: UnsafeMutablePointer<VoiceFX.State>
         var scratch: UnsafeMutablePointer<Float>
         /// Peak of the mic (Chat Mic input) since the main thread last read it.
@@ -97,11 +99,18 @@ final class AudioBridge: ObservableObject {
         voiceState.pointee.returnGain = returnGain
     }
     private var gainValues: [Float] = [1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1]
+    private var voiceGainValue: Float = 1
 
     /// Sets the software gains (0…1).
     func setGain(_ slot: Gain, _ value: Float) {
         gainValues[Int(slot.rawValue)] = value
         plan?.pointee.gains[Int(slot.rawValue)] = value
+    }
+
+    /// Gain of the processed voice on the Chat Mic device (0 while the scream guard mutes it).
+    func setVoiceGain(_ value: Float) {
+        voiceGainValue = value
+        plan?.pointee.voiceGain = value
     }
 
     func setSoftGains(lineIn: Float, console: Float) {
@@ -152,15 +161,6 @@ final class AudioBridge: ObservableObject {
         self.sampleRate = sampleRate
         installListener()
         rebuild()
-    }
-
-    /// Single Mix routing of the "Creator Mix" device (see makePlan).
-    private(set) var singleMix = false
-
-    func setSingleMix(_ on: Bool) {
-        guard on != singleMix else { return }
-        singleMix = on
-        if status == .running { rebuild() }
     }
 
     func setSampleRate(_ rate: Double) {
@@ -340,11 +340,8 @@ final class AudioBridge: ObservableObject {
         var routes: [Route] = []
         // USB inputs 0..5 -> output bridges (after the USB outputs in the aggregate output list).
         for pair in 0..<3 {
-            // Single Mix: "Creator Mix" carries the Audience mix (identical to the Master mix, but it keeps
-            // the mic when the monitor removes it from the mix the headphones listen to).
-            let source = singleMix && pair == 0 ? 1 : pair
             for c in 0..<2 {
-                guard let src = locate(inLayout, source * 2 + c), let dst = locate(outLayout, usbOut + pair * 2 + c) else { return nil }
+                guard let src = locate(inLayout, pair * 2 + c), let dst = locate(outLayout, usbOut + pair * 2 + c) else { return nil }
                 routes.append(Route(srcBuffer: src.0, srcChannel: src.1, dstBuffer: dst.0, dstChannel: dst.1, gain: 0))
             }
         }
@@ -400,6 +397,7 @@ final class AudioBridge: ObservableObject {
         gp[0] = 1
         p.initialize(to: RoutePlan(count: Int32(count), gains: gp, routes: rp, fxIn: fxIn, fxToChatMic: fxChat, fxToMixer: fxMix,
                                    fx: voiceState, scratch: voiceScratch, micPeak: micPeakStore))
+        p.pointee.voiceGain = voiceGainValue
         return p
     }
 
@@ -457,9 +455,10 @@ final class AudioBridge: ObservableObject {
         let buf = pl.scratch
         for f in 0..<frames { buf[f] = (l.0[f * l.1] + rr.0[f * rr.1]) * 0.5 }
         VoiceFX.process(pl.fx, buf, frames)
+        let voiceGain = pl.voiceGain
         for target in [pl.fxToChatMic.0, pl.fxToChatMic.1] {
             guard let o = ptr(outs, target) else { continue }
-            for f in 0..<min(frames, o.2) { o.0[f * o.1] = buf[f] }
+            for f in 0..<min(frames, o.2) { o.0[f * o.1] = buf[f] * voiceGain }
         }
         let k = pl.fx.pointee.returnGain
         // No return to the mixer's Chat channel: it is audible in the headphones (Creator/Audience mixes),

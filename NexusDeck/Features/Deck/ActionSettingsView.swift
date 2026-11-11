@@ -124,7 +124,7 @@ struct ActionSettingsView: View {
             TextField("URL", text: s.string("url"))
         case ActionID.micMute, ActionID.cough:
             DropdownRowField(title: "Silenzia", selection: s.int("mode", 0),
-                             options: [(0, "Ovunque (cuffie, diretta e chat)"), (1, "Solo diretta"), (2, "Solo chat (Chat Mic)")])
+                             options: [(0, "Ovunque (cuffie e chat)"), (2, "Solo chat (Chat Mic)")])
             if id == ActionID.cough { Text("Tieni premuto il tasto per silenziare, rilascialo per riattivare.").foregroundStyle(.secondary) }
         case ActionID.bleep:
             Text("Tieni premuto: il microfono si silenzia e parte il bip finché non rilasci.").foregroundStyle(.secondary)
@@ -215,20 +215,17 @@ struct ActionSettingsView: View {
         case ActionID.switchDSPProfile:
             DropdownRowField(title: "Profilo", selection: s.string("profile"), options: [("", "Successivo (ciclico)")] + store.library.dspProfiles.map { ($0.id.uuidString, $0.title) })
         case ActionID.muteChannel:
-            ForEach(MixBus.allCases) { bus in
-                Section(bus.title) {
-                    ForEach(MixerChannel.allCases) { ch in
-                        Toggle(ch.title, isOn: s.bool("\(bus.rawValue).\(ch.rawValue)", ch == .mic))
-                    }
+            Section("Creator Mix") {
+                ForEach(MixerChannel.allCases) { ch in
+                    Toggle(ch.title, isOn: s.bool("\(MixBus.creator.rawValue).\(ch.rawValue)", ch == .mic))
                 }
             }
         case ActionID.monitor:
             DropdownRowField(title: "Canale", selection: s.string("channel", MixerChannel.mic.rawValue), options: MixerChannel.allCases.map { ($0.rawValue, $0.title) })
         case ActionID.volume:
-            // As in the reference app: source, mix ("Mode") and the volume to set.
+            // As in the reference app: source and the volume to set.
             DropdownRowField(title: "Seleziona sorgente", selection: s.string("channel", MixerChannel.mic.rawValue),
                              options: MixerChannel.allCases.map { ($0.rawValue, $0.title) })
-            DropdownRowField(title: "Modalità", selection: s.int("mix", 0), options: [(0, "Creator / Master Mix"), (1, "Audience Mix")])
             LabeledContent("Volume") {
                 HStack(spacing: 6) {
                     TextField("", value: Binding(get: { s.wrappedValue.int("value", 50) },
@@ -297,8 +294,6 @@ struct ActionSettingsView: View {
         case ActionID.spVolUp, ActionID.spVolDown:
             Stepper("Passo: \(s.wrappedValue.int("step", 10)) %", value: s.int("step", 10), in: 1...50)
         case ActionID.mixerDashboard:
-            DropdownRowField(title: "Assegna", selection: s.int("mix", 0), options: [(0, "Creator / Master Mix"), (1, "Audience Mix")])
-            Toggle("Sincronizza cambio mix", isOn: s.bool("sync", true))
             Toggle("Indicatore di ingresso", isOn: s.bool("input", true))
         case ActionID.dcVoiceChannel, ActionID.dcTextChannel:
             if !discord.isConnected {

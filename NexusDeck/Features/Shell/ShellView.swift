@@ -301,9 +301,6 @@ struct HeaderBar: View {
     var body: some View {
         HStack(spacing: 0) {
             Text(ui.section.title).font(.system(size: 15, weight: .bold)).padding(.leading, 20)
-            if ui.section == .mixer && store.mixer.dualMix {
-                MixSegment().padding(.leading, 18)
-            }
             UpdateBadge().padding(.leading, 14)
             Spacer()
             if ![.apps, .lighting, .integrations].contains(ui.section) {
@@ -592,35 +589,6 @@ struct VisualEffect: NSViewRepresentable {
         return v
     }
     func updateNSView(_ v: NSVisualEffectView, context: Context) { v.material = material }
-}
-
-/// Creator | Audience switch shown in the toolbar with Dual Mix.
-struct MixSegment: View {
-    @EnvironmentObject var store: ProfileStore
-    @EnvironmentObject var audio: AudioService
-    @EnvironmentObject var engine: ActionEngine
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(MixBus.allCases) { b in
-                let on = store.mixer.activeMix == b
-                Button {
-                    if !on { audio.switchActiveMix(); engine.syncStates() }
-                } label: {
-                    Text(b == .creator ? "Creator" : "Audience").font(.system(size: 12, weight: on ? .medium : .regular))
-                        .foregroundStyle(on ? Theme.text : Theme.textDim)
-                        .padding(.horizontal, 14).frame(height: 22)
-                        .background(on ? Theme.card : Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: 5))
-                        .shadow(color: .black.opacity(on ? 0.12 : 0), radius: 1, y: 0.5)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(2)
-        .background(Theme.field)
-        .clipShape(RoundedRectangle(cornerRadius: 7))
-    }
 }
 
 // MARK: - Dialogs

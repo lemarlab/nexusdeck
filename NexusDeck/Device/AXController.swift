@@ -26,8 +26,6 @@ final class AXController {
     func handleInput(_ data: Data) {
         for e in AXProtocol.decode(data, state: &inputState) {
             if e == .renderAck { ack.signal(); continue }
-            // Turning a knob makes the firmware redraw the rings (LEDManager reasserts the app-drawn ones).
-            if case .knobValue = e { notifyRingReset() }
             events.send(e)
         }
     }
@@ -96,21 +94,6 @@ final class AXController {
         return reply
     }
 
-    private var ringResetStore: (() -> Void)?
-    /// Called on the main thread after a write or a knob event that makes the firmware redraw the rings.
-    var onRingReset: (() -> Void)? {
-        get { lock.lock(); defer { lock.unlock() }; return ringResetStore }
-        set { lock.lock(); ringResetStore = newValue; lock.unlock() }
-    }
-
-    private func notifyRingReset() {
-        lock.lock()
-        let handler = ringResetStore
-        lock.unlock()
-        guard let handler else { return }
-        DispatchQueue.main.async(execute: handler)
-    }
-
     private func performRaw(_ cmd: AXProtocol.Command) -> [UInt8]? {
         if cmd.preDelayMs > 0 {
             let wait = Double(cmd.preDelayMs) / 1000 - Date().timeIntervalSince(lastCommandEnd)
@@ -118,12 +101,6 @@ final class AXController {
         }
         defer { lastCommandEnd = Date() }
         guard hid.setFeature(cmd.bytes) == kIOReturnSuccess else { return nil }
-        // Writes after which the mixer redraws the knob rings (mutes, volumes, ring mode, mic setup).
-        let b = cmd.bytes
-        if b.count > 2, b[0] == 0x01, b[1] == 0x10,
-           b[2] == 0x11 || b[2] == 0x1E || b[2] == 0x20 || b[2] == 0x22 || (0x27...0x3A).contains(b[2]) {
-            notifyRingReset()
-        }
         if cmd.interDelayMs > 0 { Thread.sleep(forTimeInterval: Double(cmd.interDelayMs) / 1000) }
         return hid.getFeature(length: AXProtocol.featureSize)
     }

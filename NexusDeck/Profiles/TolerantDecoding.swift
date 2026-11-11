@@ -49,7 +49,9 @@ extension DeviceSettings {
         systemSound = c.v("systemSound", def.systemSound)
         headphonesVolume = c.v("headphonesVolume", def.headphonesVolume)
         lineOutVolume = c.v("lineOutVolume", def.lineOutVolume)
-        lineOutSource = c.v("lineOutSource", def.lineOutSource)
+        // The Audience Mix is no longer a Line Out source: old value 1 maps to Creator Mix.
+        let source = c.v("lineOutSource", def.lineOutSource)
+        lineOutSource = source == 2 ? 2 : 0
         chatMicWithEffects = c.v("chatMicWithEffects", def.chatMicWithEffects)
         sampleRate = c.v("sampleRate", def.sampleRate)
         panelOpacity = c.v("panelOpacity", def.panelOpacity)
@@ -95,26 +97,57 @@ extension MixerProfile {
         self.init(title: c.v("title", "Mixer"))
         let def = MixerProfile(title: "")
         id = c.v("id", UUID())
-        mixes = c.v("mixes", def.mixes)
+        // Keyed per mix: the dictionary is stored as [0, {…}, 1, {…}]. Decoding it per key keeps the
+        // Creator mix even when the old Audience entry is missing or unreadable.
+        let storedMixes = (try? c.decodeIfPresent([Int: MixState].self, forKey: AnyKey("mixes"))) ?? nil
+        if let storedMixes {
+            for (raw, mix) in storedMixes {
+                if let bus = MixBus(rawValue: raw) { mixes[bus] = mix }
+            }
+        }
         micInput = c.v("micInput", def.micInput)
         phantom48V = c.v("phantom48V", def.phantom48V)
         gainXLR = c.v("gainXLR", def.gainXLR)
         gain48V = c.v("gain48V", def.gain48V)
         gain63 = c.v("gain63", def.gain63)
-        activeMix = c.v("activeMix", def.activeMix)
-        linkMixes = c.v("linkMixes", def.linkMixes)
-        dualMix = c.v("dualMix", def.dualMix)
         micMonitor = c.v("micMonitor", def.micMonitor)
         micName = c.v("micName", def.micName)
         micImage = c.v("micImage", def.micImage)
         routes = c.v("routes", [:])
         chatMicMuted = c.v("chatMicMuted", false)
-        micMuteMode = c.v("micMuteMode", .all)
+        // Old "Solo diretta" mode (raw 1) no longer exists: it falls back to "everywhere".
+        micMuteMode = c.v("micMuteMode", MicMuteMode.all)
         channelNames = c.v("channelNames", [:])
         channelIcons = c.v("channelIcons", [:])
         ducking = c.v("ducking", Ducking())
         screamGuard = c.v("screamGuard", ScreamGuard())
         // "obsTracks" is no longer stored: the mode is always on (old values are ignored).
+    }
+}
+
+extension ChannelState {
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: AnyKey.self)
+        self.init()
+        level = c.v("level", 50)
+        muted = c.v("muted", false)
+        monitor = c.v("monitor", false)
+    }
+}
+
+extension MixState {
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: AnyKey.self)
+        self.init()
+        level = c.v("level", 100)
+        muted = c.v("muted", false)
+        // Channels are stored as ["mic", {…}, …]: read them one by one over the defaults.
+        let storedChannels = (try? c.decodeIfPresent([String: ChannelState].self, forKey: AnyKey("channels"))) ?? nil
+        if let storedChannels {
+            for (key, state) in storedChannels {
+                if let ch = MixerChannel(rawValue: key) { channels[ch] = state }
+            }
+        }
     }
 }
 
@@ -141,7 +174,7 @@ extension Ducking {
         fadeOutMs = c.v("fadeOutMs", 250)
         fadeInMs = c.v("fadeInMs", 800)
         channels = c.v("channels", channels)
-        streamOnly = c.v("streamOnly", false)
+        // Old "streamOnly" values are ignored: the Audience mix is an internal bus now.
     }
 }
 

@@ -8,7 +8,6 @@ enum ActionID {
     static let bleep = "mixer.bleep"
     static let fxPreset = "mixer.fxPreset"
     static let appVoice = "mixer.appVoice"
-    static let mixSwitch = "mixer.mixSwitch"
     static let muteChannel = "mixer.mute"
     static let soundboardPlay = "mixer.soundboard.play"
     static let soundboardStop = "mixer.soundboard.stop"
@@ -145,7 +144,6 @@ enum ActionCatalog {
             .init(id: ActionID.bleep, title: "Bip censura", symbol: "exclamationmark.bubble.fill"),
             .init(id: ActionID.appVoice, title: "Voice changer", symbol: "theatermasks.fill", stateTitles: ["Voce", "Voce on"]),
             .init(id: ActionID.fxPreset, title: "Preset effetti voce", symbol: "wand.and.stars", stateTitles: ["Effetti off", "Effetti on"]),
-            .init(id: ActionID.mixSwitch, title: "Cambia mix", symbol: "arrow.left.arrow.right", stateTitles: ["Mix 1", "Mix 2"]),
             .init(id: ActionID.muteChannel, title: "Muto", symbol: "speaker.slash.fill", stateTitles: ["Muto off", "Muto"], stateSymbols: ["speaker.wave.2.fill", "speaker.slash.fill"]),
             .init(id: ActionID.soundboardPlay, title: "Soundboard", symbol: "play.square.fill"),
             .init(id: ActionID.soundboardStop, title: "Ferma soundboard", symbol: "stop.fill"),

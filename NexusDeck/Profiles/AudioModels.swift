@@ -62,12 +62,6 @@ struct MixerProfile: Codable, Identifiable, Hashable {
     var gainXLR = 25
     var gain48V = 20
     var gain63 = 0
-    /// Which mix the knobs currently control.
-    var activeMix: MixBus = .creator
-    /// Whether knob changes are applied to both mixes.
-    var linkMixes = true
-    /// Single Mix: Audience Mix mirrors the Master (Creator) Mix. Dual Mix: two independent mixes.
-    var dualMix = false
     /// Mic playback in the headphones (Creator Mix).
     var micMonitor = true
     var micName = "Microfono XLR"
@@ -101,15 +95,15 @@ struct MixerProfile: Codable, Identifiable, Hashable {
     }
 }
 
-/// Outputs of the routing matrix. Headphones = Creator mix, Stream = Audience mix (Single Mix: the Mac's
-/// "Creator Mix" device carries it too), Chat = the Chat Mic output (mic only).
+/// Outputs of the routing matrix. Headphones = Creator mix, Chat = the Chat Mic output (mic only).
+/// The Audience mix is an internal Line In bus: it has no user routing column.
 enum RouteOutput: Int, CaseIterable, Identifiable {
-    case headphones = 0, stream = 1, chat = 2
+    case headphones = 0, chat = 2
     var id: Int { rawValue }
 }
 
 enum MicMuteMode: Int, Codable, CaseIterable, Identifiable {
-    case all = 0, stream = 1, chat = 2
+    case all = 0, chat = 2
     var id: Int { rawValue }
 }
 
@@ -139,8 +133,6 @@ struct Ducking: Codable, Hashable {
     var fadeOutMs: Double = 250
     var fadeInMs: Double = 800
     var channels: [String] = [MixerChannel.system.rawValue, MixerChannel.game.rawValue]
-    /// Only in the stream (Audience) or also in the headphones.
-    var streamOnly = false
 }
 
 // MARK: - Voice DSP

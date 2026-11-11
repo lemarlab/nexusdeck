@@ -182,17 +182,15 @@ struct RoutingMatrix: View {
     private func outTitle(_ o: RouteOutput) -> String {
         switch o {
         case .headphones: "Cuffie"
-        case .stream: store.mixer.dualMix ? "Diretta (Audience)" : "Diretta"
         case .chat: "Chat"
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            PageHero(section: .matrix, subtitle: "Scegli dove arriva ogni sorgente: in cuffia, in diretta o nella chat.")
+            PageHero(section: .matrix, subtitle: "Scegli dove arriva ogni sorgente: in cuffia o nella chat.")
             HStack(spacing: 10) {
                 legend("headphones", "Cuffie", "quello che senti tu")
-                legend("dot.radiowaves.left.and.right", "Diretta", "quello che sente il pubblico")
                 legend("bubble.left.fill", "Chat", "solo il microfono")
             }
             VStack(spacing: 0) {
@@ -233,7 +231,6 @@ struct RoutingMatrix: View {
                     Spacer()
                     Picker("", selection: Binding(get: { store.mixer.micMuteMode }, set: { store.mixer.micMuteMode = $0 })) {
                         Text("Silenzia ovunque").tag(MicMuteMode.all)
-                        Text("Silenzia solo la diretta").tag(MicMuteMode.stream)
                         Text("Silenzia solo la chat").tag(MicMuteMode.chat)
                     }
                     .labelsHidden().pickerStyle(.menu).frame(width: 200)
@@ -315,11 +312,6 @@ struct DuckingPage: View {
                               Binding(get: { d.thresholdDB }, set: { v in store.mixer.ducking.thresholdDB = v.rounded() }), -70...(-10))
                     sliderRow("Riduzione", "−\(Int(d.reductionDB)) dB",
                               Binding(get: { d.reductionDB }, set: { v in store.mixer.ducking.reductionDB = v.rounded() }), 3...40, commit: { audio.applyMixer() })
-                    HStack {
-                        RowLabel(title: "Solo in diretta", detail: "In cuffia i volumi restano invariati")
-                        Spacer()
-                        PillToggle(isOn: Binding(get: { d.streamOnly }, set: { v in set { $0.streamOnly = v } }))
-                    }
                 }
                 FormGroup(title: "Tempi") {
                     sliderRow("Dissolvenza in uscita", "\(Int(d.fadeOutMs)) ms",

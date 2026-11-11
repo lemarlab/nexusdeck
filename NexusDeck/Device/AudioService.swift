@@ -36,12 +36,13 @@ final class AudioService: ObservableObject {
         guard let c = controller else { return }
         let p = store.mixer
         for bus in MixBus.allCases {
-            if bus == .audience && p.obsTracks {
-                // OBS tracks mode: only the Line In, at full level (its knob is applied to the OBS copy).
+            if bus == .audience {
+                // Audience is an internal Line In bus: the physical Line In at unity (its knob is applied to
+                // the OBS copy), every other channel silent through the volume registers, never the mute bits.
                 c.send(AXProtocol.mixerVolumes(mixer: 1, values: [0, AXProtocol.mixerVolumeMax, 0, 0, 0, 0]))
                 continue
             }
-            let mix = p.mixes[p.dualMix ? bus : .creator] ?? MixState()
+            let mix = p.mixes[.creator] ?? MixState()
             let values = MixerChannel.allCases.map { ch -> Int in
                 let s = mix.channels[ch] ?? ChannelState()
                 return Self.hw(s.level * mix.level / 100)
@@ -49,7 +50,7 @@ final class AudioService: ObservableObject {
             c.send(AXProtocol.mixerVolumes(mixer: bus.rawValue, values: values))
         }
         c.send(AXProtocol.mixerMutes(muteMasks()))
-        c.send(AXProtocol.knobControl(mixer: p.dualMix && !p.obsTracks ? p.activeMix.rawValue : 0, linked: !p.dualMix && !p.obsTracks))
+        c.send(AXProtocol.knobControl(mixer: 0, linked: false))
         // The monitor overrides the mic volume in some mixes: re-apply it after the volumes.
         applyMic()
         if ducked || duckAmount > 0 { applyDucking(force: true) } else { sentDuckSteps = [:] }
@@ -57,8 +58,8 @@ final class AudioService: ObservableObject {
 
     // MARK: Mic state per output
     //
-    // Outputs: headphones = Creator mix, stream = Audience mix, chat = Chat Mic mix (verified on the device:
-    // it carries the mic only; bit0 of the third mute byte mutes it).
+    // Outputs: headphones = Creator mix, chat = Chat Mic mix (verified on the device:
+    // it carries the mic only; bit0 of the third mute byte mutes it). The Audience mix is internal (Line In).
 
     /// Temporary mute while the cough / bleep key is held (nil = not held).
     @Published private(set) var coughMode: MicMuteMode?
@@ -72,7 +73,6 @@ final class AudioService: ObservableObject {
         guard let m = coughMode else { return false }
         switch m {
         case .all: return true
-        case .stream: return out == .stream
         case .chat: return out == .chat
         }
     }
@@ -82,23 +82,23 @@ final class AudioService: ObservableObject {
         store.mixer.micMonitor && !micMuted(.creator) && store.mixer.isRouted(.mic, to: .headphones) && !coughs(.headphones)
     }
 
-    var micInStream: Bool { !micMuted(.audience) && store.mixer.isRouted(.mic, to: .stream) && !coughs(.stream) }
-
     func muteMasks() -> [UInt8] {
         let p = store.mixer
-        var masks: [UInt8] = []
-        for bus in MixBus.allCases {
-            let mix = p.mixes[p.dualMix ? bus : .creator] ?? MixState()
-            let out: RouteOutput = bus == .creator ? .headphones : .stream
-            var m: UInt8 = 0
-            for (i, ch) in MixerChannel.allCases.enumerated() where ch != .mic {
-                if mix.muted || (mix.channels[ch]?.muted ?? false) || !p.isRouted(ch, to: out) { m |= 1 << i }
-            }
-            // NexusDeck voice changer on: the clean mic is replaced (it comes back filtered on the Chat channel).
-            if (bus == .creator ? !hearsMic : !micInStream) || store.dsp.softwareVoiceActive || screamMuted { m |= 1 }
-            if bus == .audience && p.obsTracks { m = 0x3F & ~(1 << 1) }
-            masks.append(m)
+        let mix = p.mixes[.creator] ?? MixState()
+        var creator: UInt8 = 0
+        var audience: UInt8 = 0
+        // Mute bits = real user mutes only (channel/bus mute and the routing matrix). Software voice,
+        // scream protection and OBS tracks no longer touch them: the processed voice is muted in the bridge.
+        for (i, ch) in MixerChannel.allCases.enumerated() where ch != .mic {
+            let muted = mix.muted || (mix.channels[ch]?.muted ?? false)
+            if muted || !p.isRouted(ch, to: .headphones) { creator |= 1 << i }
+            if muted { audience |= 1 << i }
         }
+        // Monitor off: the firmware needs the mic bit in Creator to keep it out of the headphones.
+        if !hearsMic { creator |= 1 }
+        // The Audience bus carries no mic: its bit mirrors the user's mic mute only.
+        if micMuted(.creator) { audience |= 1 }
+        var masks: [UInt8] = [creator, audience]
         masks.append(micInChatMix ? 0 : 1)
         return masks
     }
@@ -106,8 +106,7 @@ final class AudioService: ObservableObject {
     /// Chat Mic output: muted on its own, by the "all" mute, by routing or by the cough key.
     private var micInChatMix: Bool {
         let p = store.mixer
-        let allMuted = micMuted(.creator) && micMuted(.audience)
-        return !p.chatMicMuted && !allMuted && p.isRouted(.mic, to: .chat) && !coughs(.chat) && !screamMuted
+        return !p.chatMicMuted && !micMuted(.creator) && p.isRouted(.mic, to: .chat) && !coughs(.chat)
     }
 
     /// The channel is muted (by the user or the routing matrix) in some mix on the device.
@@ -126,11 +125,9 @@ final class AudioService: ObservableObject {
         let mode = mode ?? store.mixer.micMuteMode
         switch mode {
         case .all:
-            let muted = !(micMuted(.audience) && micMuted(.creator) && store.mixer.chatMicMuted)
-            for b in MixBus.allCases { store.mixer.mixes[b, default: MixState()].channels[.mic, default: ChannelState()].muted = muted }
+            let muted = !(micMuted(.creator) && store.mixer.chatMicMuted)
+            store.mixer.mixes[.creator, default: MixState()].channels[.mic, default: ChannelState()].muted = muted
             store.mixer.chatMicMuted = muted
-        case .stream:
-            store.mixer.mixes[.audience, default: MixState()].channels[.mic, default: ChannelState()].muted.toggle()
         case .chat:
             store.mixer.chatMicMuted.toggle()
         }
@@ -162,7 +159,7 @@ final class AudioService: ObservableObject {
     private func duckingTick() {
         let d = store.mixer.ducking
         guard d.enabled else { if ducked { setDucked(false) }; return }
-        if micInputDB > d.thresholdDB && micInStream { lastSpeech = Date() }
+        if micInputDB > d.thresholdDB && !micMuted(.creator) { lastSpeech = Date() }
         let should = Date().timeIntervalSince(lastSpeech) * 1000 < d.releaseMs
         if should != ducked { setDucked(should) }
     }
@@ -212,18 +209,18 @@ final class AudioService: ObservableObject {
         guard let c = controller else { return }
         let p = store.mixer
         let d = p.ducking
-        var buses: [MixBus] = d.streamOnly ? [.audience] : (p.dualMix ? MixBus.allCases : [.creator, .audience])
-        if p.obsTracks { buses = [.creator] }
+        // Ducking only touches the Creator mix: the Audience bus is a fixed Line In bus.
+        let buses: [MixBus] = [.creator]
         if force { sentDuckSteps = [:] }
         var cmds: [AXProtocol.Command] = []
         for name in d.channels {
             // Software ducking: the channels coming from the Mac are lowered in the audio bridge, not here.
             guard let ch = MixerChannel(rawValue: name), ch != .mic, !(softDucking && ch.fromMac), let index = MixerChannel.allCases.firstIndex(of: ch) else { continue }
             for b in buses {
-                let mix = p.mixes[p.dualMix ? b : .creator] ?? MixState()
+                let mix = p.mixes[.creator] ?? MixState()
                 let base = Self.hw((mix.channels[ch]?.level ?? 50) * mix.level / 100)
-                // While the app draws the Mic ring, the physical inputs jump straight to their target (two writes per
-                // phrase instead of a fade): each volume write makes the mixer switch that ring off.
+                // With the voice going through NexusDeck the Mac channels jump straight to their target (two
+                // writes per phrase instead of a fade): their gain is applied in the bridge, sample by sample.
                 let amount: Double = softDucking ? (ducked && d.enabled ? 1 : 0) : duckAmount
                 let value = Self.duckedStep(base, d.enabled ? d.reductionDB * amount : 0)
                 let key = "\(b.rawValue).\(ch.rawValue)"
@@ -237,11 +234,10 @@ final class AudioService: ObservableObject {
         if !cmds.isEmpty { c.sendInOrder(cmds) }
     }
 
-    /// Voice priority in software while NexusDeck draws the Mic ring (voice through the Mac): the mixer volume
-    /// writes of a fade make the mixer switch that ring off many times a second, so the Mac channels (System, Game,
-    /// Chat) are lowered in the audio bridge instead. Their rings then keep the set volume. Not with "only on stream",
-    /// which needs the per-mix volumes of the mixer.
-    var softDucking: Bool { ledManager.micRingDrawn && !store.mixer.ducking.streamOnly }
+    /// Voice priority in software while the voice goes through NexusDeck (voice changer or cleanup): the mixer
+    /// volume writes of a fade would fight with the bridge's voice processing, so the Mac channels (System, Game,
+    /// Chat) are lowered in the audio bridge instead and their rings keep the set volume.
+    var softDucking: Bool { store.dsp.softwareVoiceActive }
 
     /// Gain of a Mac channel in the audio bridge (software ducking).
     func bridgeDuckFactor(_ ch: MixerChannel) -> Float { softDucking ? duckFactor(ch) : 1 }
@@ -265,11 +261,10 @@ final class AudioService: ObservableObject {
         c.send(AXProtocol.micConfig(cfg))
         // Monitor (hearing your own mic in the headphones), verified on the device:
         // - the headphones listen to the Creator mix (register 0x15 = 0);
-        // - the firmware ties the Mic knob, its ring and its mute to the Audience mix (the stream);
+        // - the firmware ties the Mic knob, its ring and its mute to the Audience mix;
         // - monitor off = mic muted in the Creator mix + register 0x22 = 0x01, which closes the Chat Mic path
         //   to the headphones without the firmware re-syncing the mic (0x12 = monitor on).
-        // In Single Mix the Mac's "Creator Mix" device is then fed from the Audience mix (see AudioBridge),
-        // so apps always receive the voice.
+        // The mic ring is drawn by the firmware.
         // As enableMonitor in the reference app: a muted mic is treated like monitor off (nothing in the headphones).
         // 0x22 = 0x01 permanently (verified): the Chat Mic mix is not heard in the headphones and the firmware
         // does not re-sync the mic, so each output's mic mute can be set freely.
@@ -284,6 +279,8 @@ final class AudioService: ObservableObject {
 
     /// Mic peak straight from the audio (set by the app: the bridge).
     var micPeakSource: () -> Float = { 0 }
+    /// Applies the gain of the processed voice in the bridge (0 = muted by the scream guard).
+    var voiceGainSink: (Float) -> Void = { _ in }
     @Published private(set) var screaming = false
     private var screamMuted: Bool { screaming && store.mixer.screamGuard.mode == .mute }
     private var lastScream = Date.distantPast
@@ -325,9 +322,10 @@ final class AudioService: ObservableObject {
 
     private func setScreaming(_ on: Bool) {
         screaming = on
+        // "mute" mode attenuates the processed voice in the bridge (the hardware mic has no mute bit of ours).
+        voiceGainSink(screamMuted ? 0 : 1)
         guard let c = controller else { return }
-        // Coming back both are restored (the mode may have changed meanwhile).
-        if !on || store.mixer.screamGuard.mode == .mute { sendMutes() }
+        // Coming back the preamp gain is restored (the mode may have changed meanwhile).
         if !on || store.mixer.screamGuard.mode == .lower { c.send(AXProtocol.preampGain(MicGain.register(effectiveGainDB))) }
     }
 
@@ -351,7 +349,7 @@ final class AudioService: ObservableObject {
     /// the processed voice out of the mixer's Chat channel (no headphone monitoring).
     var voiceReturnGain: Float {
         guard store.dsp.softwareVoiceActive else { return 0 }
-        return hearsMic || micInStream ? 1 : 0
+        return hearsMic ? 1 : 0
     }
 
     func toggleAppVoice(_ voice: Int? = nil) {
@@ -406,7 +404,8 @@ final class AudioService: ObservableObject {
         c.send(AXProtocol.powerSaving(enabled: s.powerSavingMinutes > 0, minutes: s.powerSavingMinutes))
         c.send(AXProtocol.headphoneVolume(Self.hw(s.headphonesVolume)))
         c.send(AXProtocol.lineOutVolume(Self.hw(s.lineOutVolume)))
-        c.send(AXProtocol.lineOutSource(store.mixer.dualMix ? s.lineOutSource : (s.lineOutSource == 2 ? 2 : 0)))
+        // Line Out source: Creator Mix (Chat Mic only as the extra option; old "Audience" maps to Creator).
+        c.send(AXProtocol.lineOutSource(s.lineOutSource == 2 ? 2 : 0))
     }
 
     /// Screen only (brightness / power saving): nothing else is rewritten.
@@ -429,17 +428,10 @@ final class AudioService: ObservableObject {
     /// Overrides the ambient strip (live / recording indicators).
     var auraOverride: LEDSetting?
 
-    /// Current mute / mix state the LEDs depend on (see LEDScene.compute).
+    /// Current LED state (function-key colours, strip override). The knob rings, the Mic ring included, are
+    /// drawn by the firmware.
     func ledAudioState() -> LEDAudioState {
-        let masks = muteMasks()
-        let p = store.mixer
-        let bus: MixBus = p.dualMix ? .audience : .creator
-        let mix = p.mixes[bus] ?? MixState()
-        let level = Double(mix.channels[.mic]?.level ?? 50) * Double(mix.level) / 100
-        let userMuted = (mix.channels[.mic]?.muted ?? false) || mix.muted
         var state = LEDAudioState()
-        state.micMutedInAudience = masks.count > 1 && masks[1] & 1 != 0
-        state.micRingLength = userMuted ? 0 : UInt8(max(level > 0 ? 1 : 0, min(10, Int((level / 10).rounded()))))
         state.functionKeyColors = functionKeyColors()
         state.auraOverride = auraOverride
         return state
@@ -454,14 +446,10 @@ final class AudioService: ObservableObject {
 
     func setLevel(_ ch: MixerChannel, bus: MixBus, _ level: Int) {
         let l = max(0, min(100, level))
-        let target: MixBus = store.mixer.dualMix ? bus : .creator
-        store.mixer.mixes[target, default: MixState()].channels[ch, default: ChannelState()].level = l
-        let mix = store.mixer.mixes[target] ?? MixState()
-        var hwBuses: [MixBus] = store.mixer.dualMix ? [bus] : MixBus.allCases
-        if store.mixer.obsTracks { hwBuses.removeAll { $0 == .audience } }
-        for b in hwBuses {
-            controller?.send(AXProtocol.mixerVolume(mixer: b.rawValue, channel: MixerChannel.allCases.firstIndex(of: ch)!, value: Self.hw(l * mix.level / 100)))
-        }
+        store.mixer.mixes[.creator, default: MixState()].channels[ch, default: ChannelState()].level = l
+        let mix = store.mixer.mixes[.creator] ?? MixState()
+        controller?.send(AXProtocol.mixerVolume(mixer: MixBus.creator.rawValue, channel: MixerChannel.allCases.firstIndex(of: ch)!,
+                                                value: Self.hw(l * mix.level / 100)))
         if ch == .mic { applyMic() } else { reassertMutes() }
     }
 
@@ -492,26 +480,13 @@ final class AudioService: ObservableObject {
         applyMic()
     }
 
-    /// Gain (0…1) of a channel's OBS copy: follows its knob, mute and stream routing like the mixer does.
+    /// Gain (0…1) of a channel's OBS copy: follows its knob and mute like the mixer does.
     func captureGain(_ ch: MixerChannel) -> Float {
         let p = store.mixer
-        let mix = p.mixes[p.dualMix && !p.obsTracks ? .audience : .creator] ?? MixState()
+        let mix = p.mixes[.creator] ?? MixState()
         let c = mix.channels[ch] ?? ChannelState()
-        if c.muted || mix.muted || (!p.obsTracks && !p.isRouted(ch, to: .stream)) { return 0 }
+        if c.muted || mix.muted { return 0 }
         return Float(Self.meterGain[min(20, Self.hw(c.level * mix.level / 100))]) / 32768 * duckFactor(ch)
-    }
-
-    func setDualMix(_ on: Bool) {
-        store.mixer.dualMix = on
-        if !on { store.mixer.activeMix = .creator }
-        if on, store.mixer.mixes[.audience] == nil { store.mixer.mixes[.audience] = store.mixer.mixes[.creator] }
-        applyMixer(); applyMic(); applyDevice()
-    }
-
-    func switchActiveMix() {
-        guard store.mixer.dualMix else { return }
-        store.mixer.activeMix = store.mixer.activeMix == .creator ? .audience : .creator
-        controller?.send(AXProtocol.knobControl(mixer: store.mixer.activeMix.rawValue, linked: false))
     }
 
     /// Absolute knob value 0...20 reported by hardware knob i.
@@ -519,19 +494,17 @@ final class AudioService: ObservableObject {
         guard index < MixerChannel.allCases.count else { return }
         let ch = MixerChannel.allCases[index]
         let level = Self.ui(hwValue)
-        let b: MixBus = store.mixer.dualMix ? store.mixer.activeMix : .creator
-        store.mixer.mixes[b, default: MixState()].channels[ch, default: ChannelState()].level = level
+        store.mixer.mixes[.creator, default: MixState()].channels[ch, default: ChannelState()].level = level
         if ch == .mic { applyMic() }
     }
 
-    /// A mixer knob was pressed: its channel mute flips in the mix the knobs drive (both mixes in Single Mix).
+    /// A mixer knob was pressed: its channel mute flips in the Creator mix.
     func knobToggledMute(_ index: Int) {
         guard index < MixerChannel.allCases.count else { return }
         let ch = MixerChannel.allCases[index]
         if ch == .mic { toggleMicMute(); return }
-        let buses: [MixBus] = store.mixer.dualMix ? [store.mixer.activeMix] : MixBus.allCases
-        let muted = !(store.mixer.mixes[buses[0]]?.channels[ch]?.muted ?? false)
-        for b in buses { store.mixer.mixes[b, default: MixState()].channels[ch, default: ChannelState()].muted = muted }
+        let muted = !(store.mixer.mixes[.creator]?.channels[ch]?.muted ?? false)
+        store.mixer.mixes[.creator, default: MixState()].channels[ch, default: ChannelState()].muted = muted
         controller?.send(AXProtocol.mixerMutes(muteMasks()))
         if ch == .mic { applyMic() }
     }
@@ -569,13 +542,13 @@ final class AudioService: ObservableObject {
         var newMeters = meters
         var newOut = outputMeters
         for bus in MixBus.allCases {
-            let mix = store.mixer.mixes[store.mixer.dualMix ? bus : .creator] ?? MixState()
+            let mix = store.mixer.mixes[.creator] ?? MixState()
             var m: [MixerChannel: Int] = [:]
             for (k, ch) in MixerChannel.allCases.enumerated() {
                 let c = mix.channels[ch] ?? ChannelState()
                 let peak = max(raw[2 * k], raw[2 * k + 1])
                 if c.muted || mix.muted { m[ch] = 0; continue }
-                if ch == .mic && coughs(bus == .creator ? .headphones : .stream) { m[ch] = 0; continue }
+                if ch == .mic && coughs(.headphones) { m[ch] = 0; continue }
                 if ch == .mic {
                     // With the noise gate on, nothing below its threshold reaches the mix: show it as silence.
                     let gate = store.dsp
@@ -612,16 +585,12 @@ final class AudioService: ObservableObject {
         }
         guard let state = await c.readMixer() else { return false }
         let p = store.mixer
-        var buses: [MixBus] = p.dualMix ? MixBus.allCases : [.creator]
-        if p.obsTracks { buses = [.creator] }
-        for bus in buses {
-            let mix = p.mixes[p.dualMix ? bus : .creator] ?? MixState()
-            for (i, ch) in MixerChannel.allCases.enumerated() where ch != .mic {
-                // Ducked channels are lowered on purpose.
-                if p.ducking.enabled && duckAmount > 0 && p.ducking.channels.contains(ch.rawValue) { continue }
-                let want = Self.hw((mix.channels[ch]?.level ?? 50) * mix.level / 100)
-                if abs(state.volumes[bus.rawValue][i] - want) > 1 { return false }
-            }
+        let mix = p.mixes[.creator] ?? MixState()
+        for (i, ch) in MixerChannel.allCases.enumerated() where ch != .mic {
+            // Ducked channels are lowered on purpose.
+            if p.ducking.enabled && duckAmount > 0 && p.ducking.channels.contains(ch.rawValue) { continue }
+            let want = Self.hw((mix.channels[ch]?.level ?? 50) * mix.level / 100)
+            if abs(state.volumes[MixBus.creator.rawValue][i] - want) > 1 { return false }
         }
         return true
     }

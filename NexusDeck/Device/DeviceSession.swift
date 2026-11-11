@@ -419,7 +419,7 @@ final class DeviceSession {
             pressLook?.cancel()
             defer { touchStart = nil; touchedKey = nil; showPressed = false; redraw() }
             guard let id = touchedKey, let key = deck.keys(onPage: deck.currentPage).first(where: { $0.id == id }) else { return }
-            if key.actionID == ActionID.mixerDashboard { audio.switchActiveMix(); engine.syncStates(); deck.needsRedraw.send(); return }
+            if key.actionID == ActionID.mixerDashboard { engine.syncStates(); deck.needsRedraw.send(); return }
             if key.actionID.hasPrefix("pkg:") { SDKHost.shared.keyUp(key); return }
             if ActionCatalog.holdActions.contains(key.actionID) { engine.hold(key, down: false); return }
             engine.press(key)
@@ -458,19 +458,14 @@ final class DeviceSession {
             if store.knob.knobs[i].actionID != nil {
                 if prev >= 0, v != prev { _ = engine.knobTurned(i, delta: v > prev ? 1 : -1) }
                 // Keep the hardware channel where it was.
-                let lvl = store.mixer.mixes[store.mixer.activeMix]?.channels[MixerChannel.allCases[i]]?.level ?? 50
-                controller?.send(AXProtocol.mixerVolume(mixer: store.mixer.activeMix.rawValue, channel: i, value: AudioService.hw(lvl)))
+                let lvl = store.mixer.mixes[.creator]?.channels[MixerChannel.allCases[i]]?.level ?? 50
+                controller?.send(AXProtocol.mixerVolume(mixer: MixBus.creator.rawValue, channel: i, value: AudioService.hw(lvl)))
             } else {
                 audio.knobMoved(i, hwValue: v)
                 // Turning a knob writes its volume on the device, which unmutes it: keep the mutes we set.
                 // Only when needed: every mute write while turning makes the mixer follow the knob late.
                 if i != 0, audio.hasMuteBit(channel: i) {
                     audio.reassertMutes()
-                }
-                // Voice through NexusDeck: the hardware mic must stay muted, and its ring is drawn by the app.
-                if i == 0, store.dsp.softwareVoiceActive {
-                    audio.reassertMutes()
-                    audio.ledManager.update()
                 }
                 _ = muted // The report bit does not reflect the mute state: it is read from the mixer on release.
             }

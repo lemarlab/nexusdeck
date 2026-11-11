@@ -90,7 +90,7 @@ struct TutorialView: View {
     private let pages: [(String, String, String)] = [
         ("square.grid.3x3.fill", "Widget", "Trascina azioni e widget dalla libreria sugli slot del pannello touch. Usa le pagine e le cartelle per organizzarli; fai swipe a sinistra/destra sul dispositivo per cambiare pagina."),
         ("dial.medium.fill", "Manopole", "Ogni manopola controlla un canale del mixer hardware: girala per il volume, premila per il muto. Puoi assegnarle anche ad altre funzioni."),
-        ("slider.vertical.3", "Mixer audio", "Regola i due mix (Creator e Audience), il monitor del microfono e le uscite cuffie e linea."),
+        ("slider.vertical.3", "Mixer audio", "Regola il mix, il monitor del microfono e le uscite cuffie e linea."),
         ("mic.fill", "Microfono", "Equalizzatore, noise gate, compressore, riverbero ed eco vengono elaborati dal DSP del dispositivo."),
         ("puzzlepiece.extension.fill", "Integrazioni", "Collega OBS, Streamlabs, Twitch, YouTube e Spotify per controllarli dai tasti."),
     ]

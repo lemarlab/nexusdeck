@@ -74,25 +74,23 @@ final class AppAudioRouter: ObservableObject {
     private var sentMask: UInt32?
     private var wantedMask: UInt32 = 0xFFFF_FFFF
 
-    /// Publishes only the devices that are in use: Creator/Audience Mix with Dual Mix, the "(OBS)" inputs with
-    /// the OBS tracks mode. Device indices as in the driver's table.
+    /// Publishes only the devices that are in use: the channel devices and the "(OBS)" inputs.
+    /// Device indices as in the driver's table. The Audience Mix device is never published (internal bus).
     /// The NexusDeck devices exist on the Mac only while the mixer is connected.
     var mixerConnected = false {
         didSet {
             guard mixerConnected != oldValue else { return }
-            if mixerConnected { setVisibility(dualMix: lastDual, obsTracks: lastOBS); restoreDefaultOutput() }
+            if mixerConnected { setVisibility(obsTracks: lastOBS); restoreDefaultOutput() }
             else { hideAllDevices() }
         }
     }
-    private var lastDual = false, lastOBS = false
+    private var lastOBS = false
 
-    func setVisibility(dualMix: Bool, obsTracks: Bool) {
-        lastDual = dualMix; lastOBS = obsTracks
+    func setVisibility(obsTracks: Bool) {
+        lastOBS = obsTracks
         guard mixerConnected else { wantedMask = 0; sendVisibility(); return }
         var m: UInt32 = 0
         for i in 2...7 { m |= 1 << i }                       // Chat Mic, System, Game, Chat, Line In, Console
-        if dualMix { m |= 1 << 0 }                            // Creator Mix
-        if dualMix && !obsTracks { m |= 1 << 1 }              // Audience Mix (Line In only in OBS tracks mode)
         if obsTracks { for i in 16...20 { m |= 1 << i } }     // System/Game/Chat/Line In/Console (OBS)
         wantedMask = m
         sendVisibility()

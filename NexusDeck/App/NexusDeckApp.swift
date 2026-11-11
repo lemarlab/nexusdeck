@@ -108,9 +108,9 @@ final class AppState: ObservableObject {
         started = true
         session = DeviceSession(devices: deviceManager, store: store, deck: deck, audio: audio, engine: engine)
         deviceManager.start()
-        bridge.setSingleMix(!store.mixer.dualMix && !store.mixer.obsTracks)
         bridge.start(sampleRate: Double(store.library.device.sampleRate))
         audio.micPeakSource = { [bridge] in bridge.takeMicPeak() }
+        audio.voiceGainSink = { [bridge] in bridge.setVoiceGain($0) }
         audio.updateScreamGuard()
         appRouter.start()
         // Mixer link overlay: blurred window while connecting / reconnecting, error after 5 s without a mixer.
@@ -147,19 +147,18 @@ final class AppState: ObservableObject {
         DebugSnapshot.install(ui: ui, editor: editor, deck: deck)
         #endif
         Updater.shared.startAutomaticChecks()
-        appRouter.setVisibility(dualMix: store.mixer.dualMix, obsTracks: store.mixer.obsTracks)
+        appRouter.setVisibility(obsTracks: store.mixer.obsTracks)
         appRouter.setNames(store.mixer)
         // NexusDeck devices only with the mixer connected (they are hidden at start until it is there).
         mixerVisibility = deviceManager.$state.map(\.isConnected).removeDuplicates().sink { [appRouter] c in appRouter.mixerConnected = c }
         mixSync = store.objectWillChange.debounce(for: .milliseconds(200), scheduler: RunLoop.main).sink { [self] _ in
-            bridge.setSingleMix(!store.mixer.dualMix && !store.mixer.obsTracks)
-            appRouter.setVisibility(dualMix: store.mixer.dualMix, obsTracks: store.mixer.obsTracks)
+            appRouter.setVisibility(obsTracks: store.mixer.obsTracks)
             appRouter.setNames(store.mixer)
         }
         softGainSync = store.objectWillChange.merge(with: audio.$duckAmount.map { _ in }.eraseToAnyPublisher())
             .debounce(for: .milliseconds(10), scheduler: RunLoop.main).prepend(()).sink { [self] _ in
             let m = store.mixer
-            let mix = m.mixes[m.dualMix ? m.activeMix : .creator] ?? MixState()
+            let mix = m.mixes[.creator] ?? MixState()
             func gain(_ ch: MixerChannel) -> Float {
                 let c = mix.channels[ch] ?? ChannelState()
                 if c.muted || mix.muted { return 0 }
@@ -177,8 +176,8 @@ final class AppState: ObservableObject {
             bridge.setGain(.capChat, audio.captureGain(.chat))
             bridge.setGain(.capLineIn, audio.captureGain(.lineIn))
             bridge.setGain(.capConsole, audio.captureGain(.console))
-            // The Audience mix applies the Line In at step 20: only the knob's share is added here.
-            bridge.setGain(.capLineInHW, m.obsTracks ? audio.captureGain(.lineIn) * 32768 / Float(AudioService.meterGain[20]) : 0)
+            // The Audience mix carries the physical Line In at unity: only the knob's share is added here.
+            bridge.setGain(.capLineInHW, audio.captureGain(.lineIn) * 32768 / Float(AudioService.meterGain[20]))
         }
         engine.startIntegrations()
         SDKHost.shared.start(store: store, deck: deck)
