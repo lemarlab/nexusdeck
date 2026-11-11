@@ -284,11 +284,14 @@ final class AudioService: ObservableObject {
         c.send(AXProtocol.micConfig(cfg))
         // Monitor (hearing your own mic in the headphones), verified on the device (PROTOCOL.md §Mic routing):
         // - the headphones listen to the Creator mix (register 0x15 = 0) and to the Chat Mic mix;
-        // - register 0x22 = mic | sync<<4. Monitor on = 0x01; 0x22 = 0x31 cuts the Chat Mic → headphones path
+        // - register 0x22 = mic | sync<<4, mic = mixer the mic monitor goes through (0 Creator, 1 Audience,
+        //   2 Chat Mic: assumed from MIXER_MIC 0..2, PROTOCOL.md). Monitor on = 0x00 = monitor via Creator, sync off
+        //   (follows the Creator mic knob, nothing via Audience): verified by user listening test 2026-11-11. 0x01 (via Audience) still
+        //   leaked the voice into Line In and ignored the mic knob. 0x22 = 0x31 cuts the Chat Mic → headphones path
         //   (hardware-verified, read back as 0x33) while the Chat Mic USB output keeps the voice;
         // - sync = 1 (the former 0x12) makes the firmware copy the Creator mic volume into the Audience mix (and
-        //   clears the Audience mic mute), which leaked the voice into [AM-IN] Line In; sync = 0 (0x01) keeps the
-        //   Audience mic at 0. Verified by register read-back and user listening test 2026-11-11;
+        //   clears the Audience mic mute), which leaked the voice into [AM-IN] Line In; sync = 0 keeps the Audience
+        //   mic volume at 0 (register read-back 2026-11-11);
         // - host writes of the mic bit in 0x12 are ignored: the firmware owns the Mic knob mute in Audience.
         // Monitor off (incl. a muted/routed-away mic, as enableMonitor in the reference app) = the Creator mic
         // bit in the mute masks + 0x22 = 0x31. The mic ring is drawn by the firmware.
@@ -300,9 +303,9 @@ final class AudioService: ObservableObject {
         scheduleAudienceMicCheck(after: .milliseconds(1500))  // 0x22 may have changed
     }
 
-    /// Register 0x22: sync 0 with the monitor on, 0x31 with it off (see applyMic).
+    /// Register 0x22: 0x00 (Creator, sync 0) with the monitor on, 0x31 with it off (see applyMic).
     private func micMonitorCommand() -> AXProtocol.Command {
-        AXProtocol.micMonitor(mixer: 1, sync: hearsMic ? 0 : 3)
+        hearsMic ? AXProtocol.micMonitor(mixer: 0, sync: 0) : AXProtocol.micMonitor(mixer: 1, sync: 3)
     }
 
     private var audienceMicCheck: Task<Void, Never>?
