@@ -47,8 +47,10 @@ final class AudioBridge: ObservableObject {
         case capSystem, capGame, capChat, capLineIn, capConsole
         /// Physical Line In carried by the Audience mix (OBS tracks mode), into "Line In (OBS)".
         case capLineInHW
+        /// System / Game / Chat sent to the mixer: voice priority applied in software (see AudioService.softDucking).
+        case duckSystem, duckGame, duckChat
     }
-    static let gainCount = 9
+    static let gainCount = 12
     static let maxRoutes = 64
     struct RoutePlan {
         var count: Int32
@@ -88,7 +90,7 @@ final class AudioBridge: ObservableObject {
         voiceState.pointee.voice = Int32(v)
         voiceState.pointee.returnGain = returnGain
     }
-    private var gainValues: [Float] = [1, 1, 1, 1, 1, 1, 1, 1, 0]
+    private var gainValues: [Float] = [1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1]
 
     /// Sets the software gains (0…1).
     func setGain(_ slot: Gain, _ value: Float) {
@@ -344,7 +346,8 @@ final class AudioBridge: ObservableObject {
         for pair in 0..<3 {
             for c in 0..<2 {
                 guard let src = locate(inLayout, usbIn + pair * 2 + c), let dst = locate(outLayout, pair * 2 + c) else { return nil }
-                routes.append(Route(srcBuffer: src.0, srcChannel: src.1, dstBuffer: dst.0, dstChannel: dst.1, gain: 0))
+                let duck: [Gain] = [.duckSystem, .duckGame, .duckChat]
+                routes.append(Route(srcBuffer: src.0, srcChannel: src.1, dstBuffer: dst.0, dstChannel: dst.1, gain: duck[pair].rawValue))
             }
         }
         // Line In / Console bridges -> added to USB outputs 0-1 (System channel).

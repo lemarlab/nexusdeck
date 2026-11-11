@@ -27,9 +27,9 @@ struct CustomLightingPage: View {
             .padding(.horizontal, 24).padding(.bottom, 4)
             switch area {
             case .screen: SectionCard(title: "Schermo") { screenSettings }
-            case .keys: LEDZoneEditor(led: dev(\.ledButton, { audio.applyLEDs() }), zone: .keys)
-            case .knobs: LEDZoneEditor(led: dev(\.ledKnob, { audio.applyLEDs() }), zone: .knobs)
-            case .strip: LEDZoneEditor(led: dev(\.ledAura, { audio.applyLEDs() }), zone: .strip)
+            case .keys: LEDZoneEditor(led: dev(\.ledButton, { audio.ledManager.update() }), zone: .keys)
+            case .knobs: LEDZoneEditor(led: dev(\.ledKnob, { audio.ledManager.update() }), zone: .knobs)
+            case .strip: LEDZoneEditor(led: dev(\.ledAura, { audio.ledManager.update() }), zone: .strip)
             }
         }
     }
@@ -122,9 +122,9 @@ struct CustomLightingPage: View {
             store.library.device.panelOpacity = d.panelOpacity; store.library.device.autoHideGrid = d.autoHideGrid
             store.library.device.touchEffect = d.touchEffect; store.library.device.background = d.background
             audio.applyScreen(); deck.needsRedraw.send()
-        case .keys: store.library.device.ledButton = d.ledButton; audio.applyLEDs()
-        case .knobs: store.library.device.ledKnob = d.ledKnob; audio.applyLEDs()
-        case .strip: store.library.device.ledAura = d.ledAura; audio.applyLEDs()
+        case .keys: store.library.device.ledButton = d.ledButton; audio.ledManager.update()
+        case .knobs: store.library.device.ledKnob = d.ledKnob; audio.ledManager.update()
+        case .strip: store.library.device.ledAura = d.ledAura; audio.ledManager.update()
         }
     }
 }

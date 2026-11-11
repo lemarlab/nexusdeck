@@ -70,6 +70,7 @@ final class HIDDevice {
 
     @discardableResult
     func setFeature(_ bytes: [UInt8]) -> IOReturn {
+        WriteLog.log(bytes)
         return bytes.withUnsafeBufferPointer {
             IOHIDDeviceSetReport(device, kIOHIDReportTypeFeature, 0, $0.baseAddress!, $0.count)
         }
@@ -101,3 +102,18 @@ extension IOHIDDevice {
     }
 }
 
+
+/// Temporary diagnostics: every command written to the mixer, with millisecond times (writes.log).
+enum WriteLog {
+    private static let queue = DispatchQueue(label: "nexusdeck.writelog")
+    private static let url = ProfileStore.folder.appendingPathComponent("writes.log")
+    private static let fmt: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm:ss.SSS"; return f }()
+    static func log(_ b: [UInt8]) {
+        guard b.count > 3, b[0] == 0x01 else { return }
+        let line = "\(fmt.string(from: Date())) " + b.prefix(14).map { String(format: "%02x", $0) }.joined(separator: " ") + "\n"
+        queue.async {
+            if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close() }
+            else { try? line.write(to: url, atomically: true, encoding: .utf8) }
+        }
+    }
+}

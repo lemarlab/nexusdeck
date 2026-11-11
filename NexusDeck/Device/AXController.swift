@@ -26,6 +26,8 @@ final class AXController {
     func handleInput(_ data: Data) {
         for e in AXProtocol.decode(data, state: &inputState) {
             if e == .renderAck { ack.signal(); continue }
+            // Turning a knob makes the firmware redraw the rings (LEDManager reasserts the app-drawn ones).
+            if case .knobValue = e { notifyRingReset() }
             events.send(e)
         }
     }
@@ -94,34 +96,19 @@ final class AXController {
         return reply
     }
 
-    private var patchQueued = false
-
-    /// Writes the app-drawn ring again (keep-alive), respecting the LED write gap.
-    func refreshRingPatch() {
-        commandQueue.async {
-            guard !self.patchQueued else { return }
-            self.patchQueued = true
-            self.writeRingPatch()
-        }
+    private var ringResetStore: (() -> Void)?
+    /// Called on the main thread after a write or a knob event that makes the firmware redraw the rings.
+    var onRingReset: (() -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return ringResetStore }
+        set { lock.lock(); ringResetStore = newValue; lock.unlock() }
     }
-    private var lastPatch = Date.distantPast
 
-    /// Command queue: the Mic ring drawn by the app, at least 250 ms after the previous one (LED write gap).
-    private func writeRingPatch() {
-        patchQueued = false
-        guard let patch = ringPatch else { return }
-        let wait = 0.25 - Date().timeIntervalSince(lastPatch)
-        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
-        _ = hid.setFeature(patch)
-        _ = hid.getFeature(length: AXProtocol.featureSize)
-        lastPatch = Date()
-        lastCommandEnd = lastPatch
-    }
-    /// Ring drawn by the app, written again right after each such write (nil = none).
-    private var ringPatchStore: [UInt8]?
-    var ringPatch: [UInt8]? {
-        get { lock.lock(); defer { lock.unlock() }; return ringPatchStore }
-        set { lock.lock(); ringPatchStore = newValue; lock.unlock() }
+    private func notifyRingReset() {
+        lock.lock()
+        let handler = ringResetStore
+        lock.unlock()
+        guard let handler else { return }
+        DispatchQueue.main.async(execute: handler)
     }
 
     private func performRaw(_ cmd: AXProtocol.Command) -> [UInt8]? {
@@ -135,12 +122,7 @@ final class AXController {
         let b = cmd.bytes
         if b.count > 2, b[0] == 0x01, b[1] == 0x10,
            b[2] == 0x11 || b[2] == 0x1E || b[2] == 0x20 || b[2] == 0x22 || (0x27...0x3A).contains(b[2]) {
-            // The ring the app draws is written again after the commands queued with this one (one write for a
-            // burst), as soon as the mixer accepts an LED write again.
-            if ringPatch != nil && !patchQueued {
-                patchQueued = true
-                commandQueue.async { self.writeRingPatch() }
-            }
+            notifyRingReset()
         }
         if cmd.interDelayMs > 0 { Thread.sleep(forTimeInterval: Double(cmd.interDelayMs) / 1000) }
         return hid.getFeature(length: AXProtocol.featureSize)

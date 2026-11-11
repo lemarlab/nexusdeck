@@ -24,6 +24,8 @@ enum MixerChannel: String, Codable, CaseIterable, Identifiable {
         case .chat: "bubble.left.and.bubble.right.fill"
         }
     }
+    /// Channels whose audio the Mac sends to the mixer (System, Game, Chat devices).
+    var fromMac: Bool { self == .system || self == .game || self == .chat }
 }
 
 /// The two output mixes of the hardware mixer.

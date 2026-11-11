@@ -107,9 +107,8 @@ final class DeviceSession {
         c.events.receive(on: RunLoop.main).sink { [weak self] in self?.handle($0) }.store(in: &deviceBag)
 
         // Start-up: the mixer keeps the ring colours, but restarting the audio resets the level display
-        // (config1) and every ring shows fully lit. Only the level display is restored: the colours are not
-        // rewritten at start (each colour write lights its ring fully for a moment).
-        audio.ringsKeepColors = true
+        // (config1) and every ring shows fully lit. The LEDs are only attached at the end of the start-up
+        // (see below), after the volumes are in place.
         Task {
             // A mixer just plugged in runs its own start-up for about 10 s (it resets its LEDs at the end). Any
             // command in that window leaves it without input reports (no touch, knobs or meters) until it is
@@ -122,8 +121,7 @@ final class DeviceSession {
             // Strip primer: after being switched off, the mixer takes the first strip write without lighting it,
             // and the next ones start from its own blue. One write now, seconds before the LEDs come on, makes
             // the strip light straight in its colour.
-            let d = store.library.device
-            if let primer = audio.auraCommands(audio.auraOverride ?? d.ledAura).first { c.sendInOrder([primer]) }
+            if let primer = audio.ledManager.auraPrimer() { c.sendInOrder([primer]) }
             // The first reply can be lost while the device is still starting up (or busy): try a few times.
             for attempt in 0..<5 {
                 if let fw = await c.firmwareVersion() { devices.updateFirmwareVersion(fw); break }
@@ -158,11 +156,9 @@ final class DeviceSession {
             audio.applyMixer()
             try? await Task.sleep(for: .milliseconds(600))
             guard controller === c else { return }
-            // Volumes are in place: now the rings show the levels.
-            // Volumes are set: strip, function keys and rings come back together, as fast as the mixer accepts.
-            audio.ringsKeepColors = false
+            // Volumes are set: strip, function keys and rings come back together (full send).
             lastFunctionKeyColors = audio.functionKeyColors()
-            audio.applyLEDs(force: true)
+            audio.ledManager.attach(c)
             SDKHost.shared.debugLog("Attach: LEDs sent")
 
             try? await Task.sleep(for: .seconds(1))
@@ -177,6 +173,7 @@ final class DeviceSession {
                 SDKHost.shared.debugLog("Startup check: mixer out of sync, sending the profile again (\(attempt + 1))")
                 ignoreKnobsUntil = .distantFuture
                 audio.applyAll()
+                audio.ledManager.reassert()
                 try? await Task.sleep(for: .seconds(1.5))
                 ignoreKnobsUntil = Date()
                 audio.applyMic()
@@ -194,14 +191,14 @@ final class DeviceSession {
             Thread.sleep(forTimeInterval: PanelIntro.hold)
             c.pushNow(PanelIntro.frames(appearing: false), interval: PanelIntro.interval)
         }
-        audio.allLEDsOff()
+        audio.ledManager.allOff()
         c.sendAndWait(AXProtocol.panelOff())
     }
 
     private func detach() {
         if controller != nil { SDKHost.shared.debugLog("Detach") }
         deck.deviceReady = false
-        audio.ledTask?.cancel()
+        audio.ledManager.detach()
         introUntil = .distantPast
         controller = nil
         audio.controller = nil
@@ -366,7 +363,7 @@ final class DeviceSession {
         let colors = audio.functionKeyColors()
         if colors != lastFunctionKeyColors {
             lastFunctionKeyColors = colors
-            Task { await audio.sendFunctionKeyLEDs() }
+            audio.ledManager.update()
         }
         // Cheap check before the (expensive) render: nothing drawn on the panel changed → nothing to do.
         let signature = panelSignature(turning: turning)
@@ -473,7 +470,7 @@ final class DeviceSession {
                 // Voice through NexusDeck: the hardware mic must stay muted, and its ring is drawn by the app.
                 if i == 0, store.dsp.softwareVoiceActive {
                     audio.reassertMutes()
-                    audio.applyMicRing()
+                    audio.ledManager.update()
                 }
                 _ = muted // The report bit does not reflect the mute state: it is read from the mixer on release.
             }

@@ -8,10 +8,14 @@ final class AudioService: ObservableObject {
     @Published var outputMeters: [MixBus: Int] = [:]
 
     let store: ProfileStore
-    var controller: AXController?
+    let ledManager = LEDManager()
+    var controller: AXController? {
+        didSet { if controller == nil { ledManager.detach() } }
+    }
 
     init(store: ProfileStore) {
         self.store = store
+        ledManager.service = self
     }
 
     static func hw(_ level: Int) -> Int { Int((Double(level) / 100 * Double(AXProtocol.mixerVolumeMax)).rounded()) }
@@ -25,7 +29,7 @@ final class AudioService: ObservableObject {
         applyMic()
         applyDSP()
         applyDevice()
-        applyLEDs(force: true)
+        ledManager.update()
     }
 
     func applyMixer() {
@@ -195,7 +199,7 @@ final class AudioService: ObservableObject {
         duckAmount = target > duckAmount ? min(target, duckAmount + step) : max(target, duckAmount - step)
         // Every volume write makes the mixer redraw all the knob rings: at most one fade step every 250 ms
         // (the Mic ring drawn by the app needs that gap to be written again after it), the last one always.
-        if duckAmount == target || now.timeIntervalSince(lastDuckWrite) >= 0.25 {
+        if duckAmount == target || now.timeIntervalSince(lastDuckWrite) >= 0.3 {
             lastDuckWrite = now
             applyDucking()
         }
@@ -213,11 +217,15 @@ final class AudioService: ObservableObject {
         if force { sentDuckSteps = [:] }
         var cmds: [AXProtocol.Command] = []
         for name in d.channels {
-            guard let ch = MixerChannel(rawValue: name), ch != .mic, let index = MixerChannel.allCases.firstIndex(of: ch) else { continue }
+            // Software ducking: the channels coming from the Mac are lowered in the audio bridge, not here.
+            guard let ch = MixerChannel(rawValue: name), ch != .mic, !(softDucking && ch.fromMac), let index = MixerChannel.allCases.firstIndex(of: ch) else { continue }
             for b in buses {
                 let mix = p.mixes[p.dualMix ? b : .creator] ?? MixState()
                 let base = Self.hw((mix.channels[ch]?.level ?? 50) * mix.level / 100)
-                let value = Self.duckedStep(base, d.enabled ? d.reductionDB * duckAmount : 0)
+                // While the app draws the Mic ring, the physical inputs jump straight to their target (two writes per
+                // phrase instead of a fade): each volume write makes the mixer switch that ring off.
+                let amount: Double = softDucking ? (ducked && d.enabled ? 1 : 0) : duckAmount
+                let value = Self.duckedStep(base, d.enabled ? d.reductionDB * amount : 0)
                 let key = "\(b.rawValue).\(ch.rawValue)"
                 guard sentDuckSteps[key] != value else { continue }
                 sentDuckSteps[key] = value
@@ -228,6 +236,15 @@ final class AudioService: ObservableObject {
         }
         if !cmds.isEmpty { c.sendInOrder(cmds) }
     }
+
+    /// Voice priority in software while NexusDeck draws the Mic ring (voice through the Mac): the mixer volume
+    /// writes of a fade make the mixer switch that ring off many times a second, so the Mac channels (System, Game,
+    /// Chat) are lowered in the audio bridge instead. Their rings then keep the set volume. Not with "only on stream",
+    /// which needs the per-mix volumes of the mixer.
+    var softDucking: Bool { ledManager.micRingDrawn && !store.mixer.ducking.streamOnly }
+
+    /// Gain of a Mac channel in the audio bridge (software ducking).
+    func bridgeDuckFactor(_ ch: MixerChannel) -> Float { softDucking ? duckFactor(ch) : 1 }
 
     /// Gain factor of the OBS copy of a ducked channel (the copies are lowered like the mixer).
     func duckFactor(_ ch: MixerChannel) -> Float {
@@ -260,7 +277,7 @@ final class AudioService: ObservableObject {
                        AXProtocol.headphoneSource(0),
                        AXProtocol.mixerMutes(muteMasks())].map { var x = $0; x.preDelayMs = 0; return x })
         c.send(AXProtocol.preampGain(MicGain.register(effectiveGainDB)))
-        applyMicRing()  // also when nothing was written (cleanup switched on or off)
+        ledManager.update()  // also when nothing was written (cleanup switched on or off)
     }
 
     // MARK: Scream protection
@@ -410,21 +427,22 @@ final class AudioService: ObservableObject {
     var functionKeyColors: () -> [String?] = { [nil, nil, nil, nil] }
     /// Overrides the ambient strip (live / recording indicators).
     var auraOverride: LEDSetting?
-    var ledTask: Task<Void, Never>?
-    /// Last Mic ring drawn by NexusDeck (nil = the mixer draws it).
-    var lastMicRing: [UInt8]?
-    var micRingTask: Task<Void, Never>?
-    var micRingTimer: Timer?
 
-    enum LEDGroup: Hashable { case knobs, aura, buttons }
-    var pendingLEDs: Set<LEDGroup> = []
-    var lastSentLEDs: DeviceSettings?
-    /// Last state written to each knob ring (per-knob colors), to send only what changed.
-    var lastRings: [String]?
-
-    /// Debounced: only groups whose settings changed are sent, once the user stops dragging.
-    /// Start-up: no LED is lit until the volumes are set; then keys, rings and strip are restored in one go.
-    var ringsKeepColors = false
+    /// Current mute / mix state the LEDs depend on (see LEDScene.compute).
+    func ledAudioState() -> LEDAudioState {
+        let masks = muteMasks()
+        let p = store.mixer
+        let bus: MixBus = p.dualMix ? .audience : .creator
+        let mix = p.mixes[bus] ?? MixState()
+        let level = Double(mix.channels[.mic]?.level ?? 50) * Double(mix.level) / 100
+        let userMuted = (mix.channels[.mic]?.muted ?? false) || mix.muted
+        var state = LEDAudioState()
+        state.micMutedInAudience = masks.count > 1 && masks[1] & 1 != 0
+        state.micRingLength = userMuted ? 0 : UInt8(max(level > 0 ? 1 : 0, min(10, Int((level / 10).rounded()))))
+        state.functionKeyColors = functionKeyColors()
+        state.auraOverride = auraOverride
+        return state
+    }
 
     // MARK: Edits from UI / actions
 

@@ -62,7 +62,7 @@ final class ActionEngine: ObservableObject {
         if !d.interactiveLighting { audio.auraOverride = nil }
         else if live && rec { audio.auraOverride = d.streamFirst ? d.ledStream : d.ledRecord }
         else { audio.auraOverride = live ? d.ledStream : (rec ? d.ledRecord : nil) }
-        audio.sendAura(audio.auraOverride ?? d.ledAura)
+        audio.ledManager.update()
     }
 
     func startIntegrations() {
