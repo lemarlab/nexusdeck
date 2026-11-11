@@ -432,12 +432,15 @@ final class AudioBridge: ObservableObject {
                   let dp = outs[Int(r.dstBuffer)].mData?.assumingMemoryBound(to: Float.self) else { continue }
             let stride = max(Int(outs[Int(r.dstBuffer)].mNumberChannels), 1)
             let frames = Int(outs[Int(r.dstBuffer)].mDataByteSize) / 4 / stride
-            let denom = tanhf(1.5)
+            let T: Float = 0.7
             for f in 0..<frames {
                 for c in 0..<stride {
                     let idx = f * stride + c
                     let x = dp[idx]
-                    dp[idx] = tanhf(x * 1.5) / denom
+                    let a = abs(x)
+                    if a <= T { continue }
+                    let y = T + (1 - T) * tanhf((a - T) / (1 - T))
+                    dp[idx] = (x < 0 ? -y : y)
                 }
             }
         }
