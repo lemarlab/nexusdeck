@@ -2,31 +2,29 @@
 
 ## 0.5.0 — 2026-11-11
 
-### Novità
-- Nuovo LEDManager unico: stato desiderato/inviato, invio solo delle differenze, coda ordinata; reassert dopo reset firmware e keep-alive.
-- Anello del microfono gestito dal firmware come gli altri LED (niente più spegnimenti/lampeggi).
-- Tracce OBS sempre attive: selezionare "[AM-IN] Chat Mic" per catturare la voce con effetti in OBS/Discord.
-- [AM-IN] Line In: percorso duplicato rimosso, livello calibrato (+7.5 dB) con limitatore trasparente.
-- Voicemod rientra nel mix Chat per ascoltarsi in cuffia.
-- Mix Audience usato solo internamente per il Line In.
-- Include il fix 0.4.0: routing audio per applicazione nel driver.
+### New
+- Single LEDManager: desired vs sent state, diff-only, ordered queue; keeps keys/strip/ring colours.
+- OBS tracks always on — use "[AM-IN] Chat Mic" to capture processed voice in OBS/Discord.
+- Voicemod voice returns to the Chat mix for headphone monitoring.
+- CHANGELOG.
 
-### Correzioni
-- Gain microfono corretto: prima ~2× troppo alto, ora 1 dB = 1 passo come Creator Central → molto meno fruscio.
-- Registro monitor 0x22 = 0x12/0x31 secondo il protocollo verificato.
-- La voce con effetti (riduzione rumore, de-esser, taglio bassi) non rientra più in cuffia tramite il mix Chat: si usa il monitor nativo.
-- ScreamGuard non usa più il mute del microfono ma abbassa la voce elaborata.
-- Nessuna scrittura HID ridondante sulla manopola del microfono (cache dei registri).
-- Mute = solo mute dell'utente.
+### Fixed
+- Mic preamp gain was ~2× too high (now 1 dB per step, matching Creator Central) → far less hiss.
+- Mic knob ring no longer turns off/flashes (firmware owns all knob rings, no redundant HID writes on knob turns, register write cache).
+- Monitor routing register 0x22 now 0x12/0x31 per verified protocol.
+- Processed voice (noise reduction, de-esser, low cut) no longer leaks into headphones via the Chat mix — native monitor is used.
+- [AM-IN] Line In duplicate route removed and level calibrated (+7.5 dB) with transparent soft-knee limiter.
+- Per-app audio routing fix from 0.4.0 included.
 
-### Miglioramenti
-- LED: invio solo delle differenze, coda ordinata, nessun lampeggio dell'anello mic.
-- Audio: tracce OBS sempre attive senza opzione; Line In calibrato con limitatore trasparente.
+### Improved
+- Mute bits reflect only user mutes.
+- ScreamGuard attenuates the processed voice instead of muting the mic.
+- Audience mix used internally as a Line-In-only bus.
+- Knob control unlinked early on connect.
 
-### Rimosso
-- Dual Mix; selettore Creator/Audience; colonna "Diretta"; "Solo in diretta"; uscita Line Out "Audience Mix"; opzione tracce OBS (ora sempre attive).
-- Profili vecchi caricati senza perdita del mix Creator.
+### Removed
+- Dual Mix, Creator/Audience switch, "Live" routing column, "Live only" ducking, "Audience Mix" Line Out source, OBS tracks toggle. Old profiles load without losing the Creator mix.
 
-### Note
-- Per gli effetti in OBS/Discord selezionare "[AM-IN] Chat Mic".
-- Il gain del microfono va reimpostato: i valori ora corrispondono ai dB reali.
+### Notes
+- Re-set your mic gain (values now match real dB).
+- DMG is ad-hoc signed, not notarized — first launch via right-click → Open.
