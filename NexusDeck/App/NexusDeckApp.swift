@@ -171,6 +171,7 @@ final class AppState: ObservableObject {
             bridge.setGain(.duckChat, audio.bridgeDuckFactor(.chat))
             bridge.setCleanup(lowCut: store.dsp.cleanLowCut, noise: store.dsp.cleanNoise, deEss: store.dsp.cleanDeEss)
             bridge.setVoice(store.dsp.appVoiceActive ? store.dsp.appVoice : 0, returnGain: audio.voiceReturnGain)
+            bridge.setChatReturnEnabled(store.dsp.appVoiceActive)
             bridge.setGain(.capSystem, audio.captureGain(.system))
             bridge.setGain(.capGame, audio.captureGain(.game))
             bridge.setGain(.capChat, audio.captureGain(.chat))

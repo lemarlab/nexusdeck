@@ -62,9 +62,9 @@ final class AudioBridge: ObservableObject {
         /// Return of the processed voice to the mixer. Currently disabled: it used to feed the Chat channel
         /// (USB out 5-6), which is audible in the headphones. See `chatReturnEnabled`.
         var fxToMixer: (Route, Route) = (Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0), Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0))
-        /// Off: software voice FX are published on the Chat Mic device only (OBS mic track), never monitored
-        /// in the headphones. A future "Voicemod → Monitor" route must not reuse the Chat channel: add a
-        /// dedicated monitor target and enable it here.
+        /// On only when the Voicemod voice changer is active (appVoiceActive): the processed voice is then
+        /// returned to the mixer's Chat channel (USB out 5-6) for headphone monitoring. Stays off for all
+        /// other FX (noise reduction, de-esser, low cut, presence). Chat Mic device output is unchanged.
         var chatReturnEnabled = false
         /// Gain of the processed voice published on the Chat Mic device (0 = muted by the scream guard).
         var voiceGain: Float = 1
@@ -111,6 +111,10 @@ final class AudioBridge: ObservableObject {
     func setVoiceGain(_ value: Float) {
         voiceGainValue = value
         plan?.pointee.voiceGain = value
+    }
+    /// Enable/disable the Voicemod voice return to the mixer's Chat channel (headphone monitoring).
+    func setChatReturnEnabled(_ enabled: Bool) {
+        plan?.pointee.chatReturnEnabled = enabled
     }
 
     func setSoftGains(lineIn: Float, console: Float) {
@@ -481,9 +485,8 @@ final class AudioBridge: ObservableObject {
             for f in 0..<min(frames, o.2) { o.0[f * o.1] = buf[f] * voiceGain }
         }
         let k = pl.fx.pointee.returnGain
-        // No return to the mixer's Chat channel: it is audible in the headphones (Creator/Audience mixes),
-        // and the software FX must stay out of them (headphone monitoring = the mixer's hardware Monitor only).
-        // Kept as the hook for a future "Voicemod → Monitor" route (a dedicated target, never the Chat channel).
+        // Return to the mixer's Chat channel only when Voicemod is active (chatReturnEnabled), so the processed
+        // voice is heard in the headphones; stays off for all other FX. Never returns for non-Voicemod FX.
         guard pl.chatReturnEnabled, k > 0 else { return }
         for target in [pl.fxToMixer.0, pl.fxToMixer.1] {
             guard let o = ptr(outs, target) else { continue }
