@@ -445,7 +445,7 @@ struct KnobView: View {
 
     var body: some View {
         let ch = MixerChannel.allCases[index]
-        let bus: MixBus = store.mixer.dualMix ? store.mixer.activeMix : .creator
+        let bus: MixBus = .creator
         let s = store.mixer.mixes[bus]?.channels[ch] ?? ChannelState()
         let action = store.knob.knobs[index].actionID
         let ring = store.library.device.ledKnob.knobColor(index)

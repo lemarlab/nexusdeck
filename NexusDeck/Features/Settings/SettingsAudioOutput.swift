@@ -19,8 +19,8 @@ struct OutputPage: View {
         }
         SectionCard(title: "Line Out") {
             SettingRow(title: "Sorgente", labelWidth: 110) {
-                DarkPicker(selection: Binding(get: { store.library.device.lineOutSource }, set: { store.library.device.lineOutSource = $0; audio.applyDevice() }),
-                           options: [(0, "Creator Mix"), (1, "Audience Mix"), (2, "Chat Mic")]).frame(width: 280)
+                DarkPicker(selection: Binding(get: { store.library.device.lineOutSource == 2 ? 2 : 0 }, set: { store.library.device.lineOutSource = $0; audio.applyDevice() }),
+                           options: [(0, "Creator Mix"), (2, "Chat Mic")]).frame(width: 280)
             }
         }
         SectionCard(title: "Chat Mic") {

@@ -56,10 +56,18 @@ final class AudioBridge: ObservableObject {
         var count: Int32
         var gains: UnsafeMutablePointer<Float>
         var routes: UnsafeMutablePointer<Route>
-        /// Voice changer: Chat Mic input (USB in 5-6), Chat Mic device (bridge), Chat channel to the mixer (USB out 5-6).
+        /// Voice changer: Chat Mic input (USB in 5-6), Chat Mic device (bridge), optional monitor return.
         var fxIn: (Route, Route) = (Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0), Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0))
         var fxToChatMic: (Route, Route) = (Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0), Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0))
+        /// Return of the processed voice to the mixer. Currently disabled: it used to feed the Chat channel
+        /// (USB out 5-6), which is audible in the headphones. See `chatReturnEnabled`.
         var fxToMixer: (Route, Route) = (Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0), Route(srcBuffer: -1, srcChannel: 0, dstBuffer: 0, dstChannel: 0, gain: 0))
+        /// On only when the Voicemod voice changer is active (appVoiceActive): the processed voice is then
+        /// returned to the mixer's Chat channel (USB out 5-6) for headphone monitoring. Stays off for all
+        /// other FX (noise reduction, de-esser, low cut, presence). Chat Mic device output is unchanged.
+        var chatReturnEnabled = false
+        /// Gain of the processed voice published on the Chat Mic device (0 = muted by the scream guard).
+        var voiceGain: Float = 1
         var fx: UnsafeMutablePointer<VoiceFX.State>
         var scratch: UnsafeMutablePointer<Float>
         /// Peak of the mic (Chat Mic input) since the main thread last read it.
@@ -77,8 +85,8 @@ final class AudioBridge: ObservableObject {
         return v
     }
 
-    /// Selects the voice (0 = off). The filtered voice replaces the mic on Chat Mic and is sent back to the
-    /// mixer on the Chat channel, so it is heard in the headphones and on stream.
+    /// Selects the voice (0 = off). The filtered voice replaces the mic on the Chat Mic device, so the stream /
+    /// virtual mic (OBS) gets it. It is not returned to the mixer's Chat channel: no headphone monitoring.
     /// Voice cleanup stages (they run before the voice).
     func setCleanup(lowCut: Bool, noise: Bool, deEss: Bool) {
         voiceState.pointee.cleanLowCut = lowCut
@@ -91,11 +99,22 @@ final class AudioBridge: ObservableObject {
         voiceState.pointee.returnGain = returnGain
     }
     private var gainValues: [Float] = [1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1]
+    private var voiceGainValue: Float = 1
 
     /// Sets the software gains (0…1).
     func setGain(_ slot: Gain, _ value: Float) {
         gainValues[Int(slot.rawValue)] = value
         plan?.pointee.gains[Int(slot.rawValue)] = value
+    }
+
+    /// Gain of the processed voice on the Chat Mic device (0 while the scream guard mutes it).
+    func setVoiceGain(_ value: Float) {
+        voiceGainValue = value
+        plan?.pointee.voiceGain = value
+    }
+    /// Enable/disable the Voicemod voice return to the mixer's Chat channel (headphone monitoring).
+    func setChatReturnEnabled(_ enabled: Bool) {
+        plan?.pointee.chatReturnEnabled = enabled
     }
 
     func setSoftGains(lineIn: Float, console: Float) {
@@ -146,15 +165,6 @@ final class AudioBridge: ObservableObject {
         self.sampleRate = sampleRate
         installListener()
         rebuild()
-    }
-
-    /// Single Mix routing of the "Creator Mix" device (see makePlan).
-    private(set) var singleMix = false
-
-    func setSingleMix(_ on: Bool) {
-        guard on != singleMix else { return }
-        singleMix = on
-        if status == .running { rebuild() }
     }
 
     func setSampleRate(_ rate: Double) {
@@ -334,11 +344,8 @@ final class AudioBridge: ObservableObject {
         var routes: [Route] = []
         // USB inputs 0..5 -> output bridges (after the USB outputs in the aggregate output list).
         for pair in 0..<3 {
-            // Single Mix: "Creator Mix" carries the Audience mix (identical to the Master mix, but it keeps
-            // the mic when the monitor removes it from the mix the headphones listen to).
-            let source = singleMix && pair == 0 ? 1 : pair
             for c in 0..<2 {
-                guard let src = locate(inLayout, source * 2 + c), let dst = locate(outLayout, usbOut + pair * 2 + c) else { return nil }
+                guard let src = locate(inLayout, pair * 2 + c), let dst = locate(outLayout, usbOut + pair * 2 + c) else { return nil }
                 routes.append(Route(srcBuffer: src.0, srcChannel: src.1, dstBuffer: dst.0, dstChannel: dst.1, gain: 0))
             }
         }
@@ -371,7 +378,8 @@ final class AudioBridge: ObservableObject {
             cap(usbIn + 2, 1, .capGame)
             cap(usbIn + 4, 2, .capChat)
             if softCount == 2 {
-                cap(usbIn + 6, 3, .capLineIn)
+                // Line In OBS track is fed only by the hardware Audience path (capLineInHW below);
+                // the soft "Line In" bridge route is intentionally omitted to avoid a duplicate/summed copy.
                 cap(usbIn + 8, 4, .capConsole)
             }
             cap(2, 3, .capLineInHW)   // USB input 3-4 = Audience mix
@@ -394,6 +402,7 @@ final class AudioBridge: ObservableObject {
         gp[0] = 1
         p.initialize(to: RoutePlan(count: Int32(count), gains: gp, routes: rp, fxIn: fxIn, fxToChatMic: fxChat, fxToMixer: fxMix,
                                    fx: voiceState, scratch: voiceScratch, micPeak: micPeakStore))
+        p.pointee.voiceGain = voiceGainValue
         return p
     }
 
@@ -420,6 +429,25 @@ final class AudioBridge: ObservableObject {
                 vDSP_vsma(sp + sc, vDSP_Stride(sStride), &gain, dp + dc, vDSP_Stride(dStride), dp + dc, vDSP_Stride(dStride), vDSP_Length(frames))
             }
         }
+        // Soft limiter on the [AM-IN] Line In capture route only (RT-safe, no alloc/lock).
+        for i in 0..<Int(plan.pointee.count) {
+            let r = routes[i]
+            guard r.gain == Int32(Gain.capLineInHW.rawValue), Int(r.dstBuffer) < outs.count,
+                  let dp = outs[Int(r.dstBuffer)].mData?.assumingMemoryBound(to: Float.self) else { continue }
+            let stride = max(Int(outs[Int(r.dstBuffer)].mNumberChannels), 1)
+            let frames = Int(outs[Int(r.dstBuffer)].mDataByteSize) / 4 / stride
+            let T: Float = 0.7
+            for f in 0..<frames {
+                for c in 0..<stride {
+                    let idx = f * stride + c
+                    let x = dp[idx]
+                    let a = abs(x)
+                    if a <= T { continue }
+                    let y = T + (1 - T) * tanhf((a - T) / (1 - T))
+                    dp[idx] = (x < 0 ? -y : y)
+                }
+            }
+        }
         micPeak(plan, ins)
         voice(plan, ins, outs)
     }
@@ -435,8 +463,9 @@ final class AudioBridge: ObservableObject {
         if peak > plan.pointee.micPeak.pointee { plan.pointee.micPeak.pointee = peak }
     }
 
-    /// Voice changer: mono mic from the Chat Mic input → effects → Chat Mic device (replacing the clean voice)
-    /// and added to the Chat channel going back to the mixer.
+    /// Voice changer: mono mic from the Chat Mic input → effects → Chat Mic device (replacing the clean voice).
+    /// The processed voice is published on that device only (the virtual mic OBS captures): it is never added
+    /// to the mixer's Chat channel, so it is not heard in the headphones.
     nonisolated private static func voice(_ plan: UnsafeMutablePointer<RoutePlan>, _ ins: UnsafeMutableAudioBufferListPointer, _ outs: UnsafeMutableAudioBufferListPointer) {
         let pl = plan.pointee
         guard pl.fx.pointee.voice > 0 || VoiceFX.cleaning(pl.fx), pl.fxIn.0.srcBuffer >= 0, pl.fxIn.1.srcBuffer >= 0 else { return }
@@ -450,12 +479,15 @@ final class AudioBridge: ObservableObject {
         let buf = pl.scratch
         for f in 0..<frames { buf[f] = (l.0[f * l.1] + rr.0[f * rr.1]) * 0.5 }
         VoiceFX.process(pl.fx, buf, frames)
+        let voiceGain = pl.voiceGain
         for target in [pl.fxToChatMic.0, pl.fxToChatMic.1] {
             guard let o = ptr(outs, target) else { continue }
-            for f in 0..<min(frames, o.2) { o.0[f * o.1] = buf[f] }
+            for f in 0..<min(frames, o.2) { o.0[f * o.1] = buf[f] * voiceGain }
         }
         let k = pl.fx.pointee.returnGain
-        guard k > 0 else { return }
+        // Return to the mixer's Chat channel only when Voicemod is active (chatReturnEnabled), so the processed
+        // voice is heard in the headphones; stays off for all other FX. Never returns for non-Voicemod FX.
+        guard pl.chatReturnEnabled, k > 0 else { return }
         for target in [pl.fxToMixer.0, pl.fxToMixer.1] {
             guard let o = ptr(outs, target) else { continue }
             for f in 0..<min(frames, o.2) { o.0[f * o.1] += buf[f] * k }

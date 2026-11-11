@@ -146,16 +146,14 @@ final class ActionEngine: ObservableObject {
 
         // Mixer
         case ActionID.mixerDashboard:
-            audio.switchActiveMix()
             deck.needsRedraw.send()
         case ActionID.monitor:
             audio.setMonitor(.mic, bus: .creator, !store.mixer.micMonitor)
-        case ActionID.mixSwitch: audio.switchActiveMix()
         case ActionID.muteChannel:
-            var targets: [(MixBus, MixerChannel)] = []
-            for b in MixBus.allCases { for ch in MixerChannel.allCases where s.bool("\(b.rawValue).\(ch.rawValue)", ch == .mic) { targets.append((b, ch)) } }
-            let anyUnmuted = targets.contains { !(store.mixer.mixes[$0.0]?.channels[$0.1]?.muted ?? false) }
-            for (b, ch) in targets { audio.setMute(ch, buses: [b], anyUnmuted) }
+            var targets: [MixerChannel] = []
+            for ch in MixerChannel.allCases where s.bool("\(MixBus.creator.rawValue).\(ch.rawValue)", ch == .mic) { targets.append(ch) }
+            let anyUnmuted = targets.contains { !(store.mixer.mixes[.creator]?.channels[$0]?.muted ?? false) }
+            for ch in targets { audio.setMute(ch, buses: [.creator], anyUnmuted) }
         case ActionID.volume:
             // "set" is the reference behavior; "up"/"down" are kept for keys made by older NexusDeck versions.
             let ch = s.string("channel", "mic"), mode = s.string("mode", "set"), v = s.int("value", 50)
@@ -167,8 +165,7 @@ final class ActionEngine: ObservableObject {
                 store.library.device.lineOutVolume = max(0, min(100, apply(store.library.device.lineOutVolume))); audio.applyDevice()
             default:
                 let c = MixerChannel(rawValue: ch) ?? .mic
-                let bus = MixBus(rawValue: s.int("mix")) ?? .creator
-                audio.setLevel(c, bus: bus, apply(store.mixer.mixes[bus]?.channels[c]?.level ?? 50))
+                audio.setLevel(c, bus: .creator, apply(store.mixer.mixes[.creator]?.channels[c]?.level ?? 50))
             }
         case ActionID.micEffect:
             switch s.string("effect", "reverb") {
@@ -369,7 +366,7 @@ final class ActionEngine: ObservableObject {
     func knobPressed(_ index: Int) {
         let k = store.knob.knobs[index]
         guard let id = k.actionID else {
-            audio.toggleMute(MixerChannel.allCases[index], bus: store.mixer.activeMix)
+            audio.toggleMute(MixerChannel.allCases[index], bus: .creator)
             return
         }
         guard k.settings.string("press", "mute") == "mute" else { return }
@@ -431,8 +428,9 @@ final class ActionEngine: ObservableObject {
                 state = store.mixer.micMonitor ? 1 : 0
             case ActionID.micMute:
                 switch MicMuteMode(rawValue: s.int("mode")) ?? .all {
-                case .all: state = audio.micInStream || !store.mixer.chatMicMuted ? 0 : 1
-                case .stream: state = audio.micInStream ? 0 : 1
+                case .all:
+                    let micMuted = (store.mixer.mixes[.creator]?.channels[.mic]?.muted ?? false) || (store.mixer.mixes[.creator]?.muted ?? false)
+                    state = micMuted && store.mixer.chatMicMuted ? 1 : 0
                 case .chat: state = store.mixer.chatMicMuted ? 1 : 0
                 }
             case ActionID.fxPreset: state = fxPresetActive(s) ? 1 : 0
@@ -442,9 +440,8 @@ final class ActionEngine: ObservableObject {
                 // The key shows the voice it controls.
                 let shown = v > 0 && s.int("press", 0) == 0 ? v : store.dsp.appVoice
                 deck.setLiveText(k.id, state == 1 || v > 0 ? VoiceFX.voices[min(max(shown, 1), VoiceFX.voices.count - 1)].name : "Voce spenta")
-            case ActionID.mixSwitch: state = store.mixer.activeMix.rawValue
             case ActionID.muteChannel:
-                let anyMuted = MixBus.allCases.contains { b in MixerChannel.allCases.contains { ch in s.bool("\(b.rawValue).\(ch.rawValue)", ch == .mic) && (store.mixer.mixes[b]?.channels[ch]?.muted ?? false) } }
+                let anyMuted = MixerChannel.allCases.contains { ch in s.bool("\(MixBus.creator.rawValue).\(ch.rawValue)", ch == .mic) && (store.mixer.mixes[.creator]?.channels[ch]?.muted ?? false) }
                 state = anyMuted ? 1 : 0
             case ActionID.micEffect:
                 let on: Bool
@@ -458,7 +455,7 @@ final class ActionEngine: ObservableObject {
                 state = on ? 1 : 0
             case ActionID.volume:
                 let ch = s.string("channel", "mic")
-                if let c = MixerChannel(rawValue: ch) { text = "\(store.mixer.mixes[MixBus(rawValue: s.int("mix")) ?? .creator]?.channels[c]?.level ?? 0)" }
+                if let c = MixerChannel(rawValue: ch) { text = "\(store.mixer.mixes[.creator]?.channels[c]?.level ?? 0)" }
                 else { text = "\(ch == "headphones" ? store.library.device.headphonesVolume : store.library.device.lineOutVolume)" }
             case ActionID.switchDSPProfile: text = s.string("profile").isEmpty ? store.dsp.title : nil
             default: continue

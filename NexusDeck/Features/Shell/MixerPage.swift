@@ -37,8 +37,7 @@ struct MixerPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 8) {
-                chip("Dual Mix", "circle.lefthalf.filled", store.mixer.dualMix) { audio.setDualMix(!store.mixer.dualMix) }
-                chip("Tracce streaming", "record.circle", store.mixer.obsTracks) { audio.setOBSTracks(!store.mixer.obsTracks) }
+                chip("Tracce streaming", "record.circle", true) { ui.section = .obs }
                 chip(audio.ducked ? "Voce in primo piano · attiva" : "Voce in primo piano", "arrow.down.right.and.arrow.up.left", store.mixer.ducking.enabled) { ui.section = .ducking }
                 chip(store.mixer.micMonitor ? "Monitor attivo" : "Monitor spento", store.mixer.micMonitor ? "headphones" : "headphones.slash", store.mixer.micMonitor) {
                     audio.setMonitor(.mic, bus: .creator, !store.mixer.micMonitor)
@@ -64,7 +63,7 @@ struct MixerPage: View {
     }
 
     private var lineOutSource: String {
-        ["Creator Mix", "Audience Mix", "Chat Mic"][min(2, max(0, store.library.device.lineOutSource))]
+        store.library.device.lineOutSource == 2 ? "Chat Mic" : "Creator Mix"
     }
 
     private var chatMicCard: some View {
@@ -117,7 +116,7 @@ struct ChannelStrip: View {
     @EnvironmentObject var engine: ActionEngine
     @EnvironmentObject var ui: UIState
 
-    private var bus: MixBus { store.mixer.dualMix ? store.mixer.activeMix : .creator }
+    private var bus: MixBus { .creator }
 
     var body: some View {
         let s = store.mixer.mixes[bus]?.channels[channel] ?? ChannelState()
@@ -266,20 +265,19 @@ struct ChannelInspector: View {
                         ChannelTile(channel: ch, size: 34)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(store.mixer.name(ch)).font(.system(size: 14, weight: .semibold))
-                            Text("Manopola \(i + 1) · \(store.mixer.dualMix ? store.mixer.activeMix.title : "Master Mix")")
+                            Text("Manopola \(i + 1) · Master Mix")
                                 .font(.system(size: 11.5)).foregroundStyle(Theme.textDim)
                         }
                     }
                     InspectorSection("Uscite") {
                         routeRow("Cuffie", ch, .headphones)
-                        routeRow("Diretta", ch, .stream)
                         if ch == .mic { routeRow("Chat", ch, .chat) }
                     }
                     if ch == .mic {
                         InspectorSection("Muto") {
                             InspectorRow("La manopola silenzia") {
                                 DarkPicker(selection: Binding(get: { store.mixer.micMuteMode }, set: { store.mixer.micMuteMode = $0 }),
-                                           options: [(.all, "Ovunque"), (.stream, "Solo diretta"), (.chat, "Solo chat")]).frame(width: 130)
+                                           options: [(.all, "Ovunque"), (.chat, "Solo chat")]).frame(width: 130)
                             }
                             InspectorRow("Ascolto in cuffia") {
                                 PillToggle(isOn: Binding(get: { store.mixer.micMonitor }, set: { audio.setMonitor(.mic, bus: .creator, $0) }))

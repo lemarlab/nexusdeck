@@ -26,8 +26,6 @@ final class AXController {
     func handleInput(_ data: Data) {
         for e in AXProtocol.decode(data, state: &inputState) {
             if e == .renderAck { ack.signal(); continue }
-            // Turning a knob makes the firmware redraw the rings (LEDManager reasserts the app-drawn ones).
-            if case .knobValue = e { notifyRingReset() }
             events.send(e)
         }
     }
@@ -86,29 +84,42 @@ final class AXController {
     /// Last mute masks written: a volume write unmutes the channel on the device, so they are re-sent after it.
     private var lastMutes: AXProtocol.Command?
 
+    /// Last payload written per register (accessed only on `commandQueue`). The firmware owns these values (a
+    /// knob turn applies the volume in hardware) and an identical write only makes it reset and redraw the
+    /// knob rings, so unchanged config / monitor / mute / preamp / mixer writes are not sent at all.
+    private var lastWrite: [UInt8: [UInt8]] = [:]
+
+    /// Registers whose writes are skipped when the payload did not change. LED registers stay out: they are
+    /// re-sent on purpose (the firmware drops the first ones after a restart).
+    private static func isCached(_ register: UInt8) -> Bool {
+        [0x11, 0x15, 0x1F, 0x20, 0x22].contains(register) || (0x27...0x3A).contains(register)
+    }
+
+    /// Forgets the payloads written so far, so the next writes reach the device: called on attach / detach and
+    /// when the mixer was found out of sync (full resend).
+    func invalidateWriteCache() {
+        commandQueue.async { self.lastWrite.removeAll() }
+    }
+
     private func perform(_ cmd: AXProtocol.Command) -> [UInt8]? {
-        let reply = performRaw(cmd)
         let b = cmd.bytes
+        var payload: [UInt8]?
+        if b.count > 4, b[0] == 0x01, b[1] == 0x10, Self.isCached(b[2]) {
+            let len = Int(b[3])
+            if 4 + len <= b.count {
+                let p = Array(b[4..<(4 + len)])
+                if lastWrite[b[2]] == p { return nil }
+                payload = p
+            }
+        }
+        let reply = performRaw(cmd)
+        if let payload, reply != nil { lastWrite[b[2]] = payload }
         if b.count > 2, b[0] == 0x01, b[1] == 0x10 {
             if b[2] == 0x11 { lastMutes = cmd }
+            // A volume write unmutes the channel: the mutes go again, but only after a write that was sent.
             else if (0x27...0x3A).contains(b[2]), let m = lastMutes { _ = performRaw(m) }
         }
         return reply
-    }
-
-    private var ringResetStore: (() -> Void)?
-    /// Called on the main thread after a write or a knob event that makes the firmware redraw the rings.
-    var onRingReset: (() -> Void)? {
-        get { lock.lock(); defer { lock.unlock() }; return ringResetStore }
-        set { lock.lock(); ringResetStore = newValue; lock.unlock() }
-    }
-
-    private func notifyRingReset() {
-        lock.lock()
-        let handler = ringResetStore
-        lock.unlock()
-        guard let handler else { return }
-        DispatchQueue.main.async(execute: handler)
     }
 
     private func performRaw(_ cmd: AXProtocol.Command) -> [UInt8]? {
@@ -118,12 +129,6 @@ final class AXController {
         }
         defer { lastCommandEnd = Date() }
         guard hid.setFeature(cmd.bytes) == kIOReturnSuccess else { return nil }
-        // Writes after which the mixer redraws the knob rings (mutes, volumes, ring mode, mic setup).
-        let b = cmd.bytes
-        if b.count > 2, b[0] == 0x01, b[1] == 0x10,
-           b[2] == 0x11 || b[2] == 0x1E || b[2] == 0x20 || b[2] == 0x22 || (0x27...0x3A).contains(b[2]) {
-            notifyRingReset()
-        }
         if cmd.interDelayMs > 0 { Thread.sleep(forTimeInterval: Double(cmd.interDelayMs) / 1000) }
         return hid.getFeature(length: AXProtocol.featureSize)
     }

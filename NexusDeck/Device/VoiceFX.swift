@@ -21,7 +21,8 @@ enum VoiceFX {
     /// Mutable DSP state (one per bridge).
     struct State {
         var voice: Int32 = 0
-        /// Gain of the filtered voice sent back to the mixer (0 = only on Chat Mic).
+        /// Gain of the filtered voice for the monitor return (currently unused: the FX never goes back to the
+        /// mixer's Chat channel, see AudioBridge.chatReturnEnabled).
         var returnGain: Float = 1
         var sampleRate: Float = 48000
         /// Pitch shifter delay line.

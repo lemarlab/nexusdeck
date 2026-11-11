@@ -182,17 +182,15 @@ struct RoutingMatrix: View {
     private func outTitle(_ o: RouteOutput) -> String {
         switch o {
         case .headphones: "Cuffie"
-        case .stream: store.mixer.dualMix ? "Diretta (Audience)" : "Diretta"
         case .chat: "Chat"
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            PageHero(section: .matrix, subtitle: "Scegli dove arriva ogni sorgente: in cuffia, in diretta o nella chat.")
+            PageHero(section: .matrix, subtitle: "Scegli dove arriva ogni sorgente: in cuffia o nella chat.")
             HStack(spacing: 10) {
                 legend("headphones", "Cuffie", "quello che senti tu")
-                legend("dot.radiowaves.left.and.right", "Diretta", "quello che sente il pubblico")
                 legend("bubble.left.fill", "Chat", "solo il microfono")
             }
             VStack(spacing: 0) {
@@ -233,7 +231,6 @@ struct RoutingMatrix: View {
                     Spacer()
                     Picker("", selection: Binding(get: { store.mixer.micMuteMode }, set: { store.mixer.micMuteMode = $0 })) {
                         Text("Silenzia ovunque").tag(MicMuteMode.all)
-                        Text("Silenzia solo la diretta").tag(MicMuteMode.stream)
                         Text("Silenzia solo la chat").tag(MicMuteMode.chat)
                     }
                     .labelsHidden().pickerStyle(.menu).frame(width: 200)
@@ -315,11 +312,6 @@ struct DuckingPage: View {
                               Binding(get: { d.thresholdDB }, set: { v in store.mixer.ducking.thresholdDB = v.rounded() }), -70...(-10))
                     sliderRow("Riduzione", "−\(Int(d.reductionDB)) dB",
                               Binding(get: { d.reductionDB }, set: { v in store.mixer.ducking.reductionDB = v.rounded() }), 3...40, commit: { audio.applyMixer() })
-                    HStack {
-                        RowLabel(title: "Solo in diretta", detail: "In cuffia i volumi restano invariati")
-                        Spacer()
-                        PillToggle(isOn: Binding(get: { d.streamOnly }, set: { v in set { $0.streamOnly = v } }))
-                    }
                 }
                 FormGroup(title: "Tempi") {
                     sliderRow("Dissolvenza in uscita", "\(Int(d.fadeOutMs)) ms",
@@ -406,21 +398,18 @@ struct OBSTracksPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            PageHero(section: .obs, subtitle: "Ogni canale diventa anche un ingresso audio del Mac, da mettere su una traccia diversa in OBS, Streamlabs o altri programmi di streaming.") {
-                PillToggle(isOn: Binding(get: { store.mixer.obsTracks }, set: { audio.setOBSTracks($0) }))
-            }
+            PageHero(section: .obs, subtitle: "Ogni canale è sempre anche un ingresso audio del Mac, da mettere su una traccia diversa in OBS, Streamlabs o altri programmi di streaming.")
             VStack(alignment: .leading, spacing: 7) {
                 Text("Ingressi disponibili").font(.system(size: 13, weight: .semibold)).padding(.leading, 4)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
                     track(.mic, "[AM-IN] Chat Mic", "Solo la voce")
-                    track(.lineIn, "[AM-IN] \(store.mixer.name(.lineIn).capitalized)", store.mixer.obsTracks ? "Line In fisico + dispositivo Line In" : "Dispositivo Line In del Mac")
+                    track(.lineIn, "[AM-IN] \(store.mixer.name(.lineIn).capitalized)", "Line In fisico + dispositivo Line In")
                     track(.console, "[AM-IN] \(store.mixer.name(.console).capitalized)", "Dispositivo Console del Mac")
                     track(.system, "[AM-IN] \(store.mixer.name(.system).capitalized)", "System e app instradate")
                     track(.game, "[AM-IN] \(store.mixer.name(.game).capitalized)", "Game e app instradate")
                     track(.chat, "[AM-IN] \(store.mixer.name(.chat).capitalized)", "Chat e app instradate")
                 }
             }
-            .opacity(store.mixer.obsTracks ? 1 : 0.5)
             FormGroup(title: "Come usarle · es. musica in diretta ma non nel VOD") {
                 step(1, "Nel programma di streaming aggiungi una sorgente di ingresso audio per ogni canale e scegli il suo ingresso [AM-IN].")
                 step(2, "Assegna ogni sorgente alla sua traccia (in OBS: Proprietà audio avanzate).")

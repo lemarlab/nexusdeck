@@ -19,8 +19,7 @@ struct WidgetOrKeyView: View {
         } else {
         switch key.actionID {
         case ActionID.mixerDashboard:
-            // "Sync" (default) follows the mix the knobs control; otherwise the fixed mix chosen in the settings.
-            MixerDashboardFace(mixer: store.mixer, bus: key.settings.bool("sync", true) ? store.mixer.activeMix : (MixBus(rawValue: key.settings.int("mix")) ?? .creator),
+            MixerDashboardFace(mixer: store.mixer,
                                inputIndicator: key.settings.bool("input", true),
                                knobColors: (0..<6).map { store.library.device.ledKnob.knobColor($0) })
         case ActionID.pageIndicator:
@@ -58,7 +57,6 @@ struct PageIndicatorFace: View {
 
 struct MixerDashboardFace: View {
     let mixer: MixerProfile
-    let bus: MixBus
     var inputIndicator = true
     /// Ring colours of the six knobs (same as the device LEDs).
     var knobColors: [Color] = Array(repeating: Color(hex: "#0A84FF"), count: 6)
@@ -67,16 +65,11 @@ struct MixerDashboardFace: View {
     var body: some View {
         GeometryReader { g in
             let u = g.size.width / 800 // panel units (the dashboard is 800 wide on the panel)
-            let mix = mixer.mixes[mixer.dualMix ? bus : .creator] ?? MixState()
+            let mix = mixer.mixes[.creator] ?? MixState()
             HStack(spacing: 14 * u) {
-                // Left: the mix the knobs drive.
+                // Left: the Creator mix the knobs drive.
                 VStack(spacing: 18 * u) {
-                    if mixer.dualMix {
-                        busTile("CREATOR", "person.wave.2.fill", active: bus == .creator, u: u)
-                        busTile("AUDIENCE", "dot.radiowaves.left.and.right", active: bus == .audience, u: u)
-                    } else {
-                        busTile("MASTER", "slider.vertical.3", active: true, u: u)
-                    }
+                    busTile("MASTER", "slider.vertical.3", active: true, u: u)
                 }
                 .frame(width: 190 * u)
                 .frame(maxHeight: .infinity)
@@ -95,7 +88,7 @@ struct MixerDashboardFace: View {
     }
 
     private func busTile(_ title: String, _ symbol: String, active: Bool, u: CGFloat) -> some View {
-        let size: CGFloat = (mixer.dualMix ? 92 : 112) * u
+        let size: CGFloat = 112 * u
         return VStack(spacing: 10 * u) {
             RoundedRectangle(cornerRadius: size * 0.27)
                 .fill(active ? AnyShapeStyle(LinearGradient(colors: [Color(hex: "#FFB340"), Color(hex: "#FF7A00")], startPoint: .top, endPoint: .bottom))
@@ -123,7 +116,7 @@ struct MixerDashboardFace: View {
                     .shadow(color: ring.opacity(0.6), radius: 4 * u)
                 // Live input level, inside the volume arc.
                 if inputIndicator {
-                    let lvl = CGFloat(meters.values[mixer.dualMix ? bus : .creator]?[ch] ?? 0) / 100
+                    let lvl = CGFloat(meters.values[.creator]?[ch] ?? 0) / 100
                     Circle().trim(from: 0, to: 0.75 * (s.muted ? 0 : lvl))
                         .stroke(Color(hex: "#30D158"), style: StrokeStyle(lineWidth: 3 * u, lineCap: .round))
                         .rotationEffect(.degrees(135)).padding(11 * u)
