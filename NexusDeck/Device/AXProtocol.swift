@@ -90,7 +90,9 @@ enum AXProtocol {
     /// bit0 phantom power, bits1-3 mic mode per mixer, bit4 mic table.
     static func micConfig(_ v: UInt8) -> Command { write(0x20, [v]) }
     static func readMicConfig() -> Command { read(0x20, 1) }
-    /// Register 0x22: low nibble = mixer heard in the monitor, high nibble = sync (1 = mic monitor on, 3 = off, 0 = dual mix).
+    /// Register 0x22: mic | sync<<4. NexusDeck always writes 0x00 (monitor via Creator, sync off). Never write
+    /// sync ≠ 0: the firmware then copies the Creator mic level into the Audience / Chat Mic mixes, so the mic
+    /// leaks into [AM-IN] Line In. Measured 2026-11-12.
     static func micMonitor(mixer: UInt8, sync: UInt8) -> Command { write(0x22, [mixer | (sync << 4)]) }
     static func preampGain(_ g: Int) -> Command { write(0x1F, [UInt8(max(0, min(119, g)))]) }
     static func pgaAttenuation(_ v: Int) -> Command { write(0x23, [UInt8(max(0, min(8, v)))]) }

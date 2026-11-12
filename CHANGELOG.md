@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.1 — 2026-11-12
+
+### Fixed
+- [AM-IN] Chat Mic was silent in 0.6.0 on some mixers: with mix sync off, the Chat Mic mix kept a stale (zero) mic level. The app now writes the Chat Mic mix (mic only) explicitly.
+- Mic voice no longer leaks into [AM-IN] Line In in any state: register 0x22 is always 0x00 (no mix sync). Turning the headphone monitor off previously re-enabled sync and copied the mic into the Line In bus for ~2 s.
+- The mic knob controls the [AM-IN] Chat Mic level again (applied in software, smoothed, no extra writes to the mixer), including the processed-voice path.
+
+### Improved
+- Monitor off is done by muting the mic in the Creator mix only; the Line In and Chat Mic buses are never touched.
+- [AM-IN] Line In: OBS compensation reduced from +7.5 dB to +2.5 dB and the soft-knee limiter threshold raised to −0.5 dBFS, so the track keeps headroom at full knob.
+- The app re-checks the Line In and Chat Mic bus levels after connect, settings changes and mic knob turns, and repairs them only if needed.
+
+### Verified
+- Guided hardware test (register read-back + audio levels) on the dev Mac: voice, Line In, mic knob, Line In knob, mic mute, all knobs/mutes, monitor on/off, voice FX, Voicemod, USB reconnect.
+
+### Notes
+- Ad-hoc signed, not notarized: first launch via right-click → Open.
+
 ## 0.6.0 — 2026-11-11
 
 ### Fixed

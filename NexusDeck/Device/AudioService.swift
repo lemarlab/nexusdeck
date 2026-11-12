@@ -22,10 +22,11 @@ final class AudioService: ObservableObject {
         ledManager.service = self
     }
 
-    /// Measured 2026-11-11: Audience→USB path (Line In) sits ~7.5 dB below the Creator mix for the same source,
-    /// so the OBS copy needs this compensation to match headphone balance.
-    static let lineInOBSCompensationDB: Double = 7.5
-    static let lineInOBSCompensation: Float = Float(pow(10, 7.5 / 20.0))
+    /// Measured 2026-11-12: with the Line In knob at max the Audience→USB path (the OBS copy, [AM-IN] Line In)
+    /// peaks at −3.5 dBFS, so only ~2.5 dB of compensation are needed to match the headphone balance. (Was
+    /// 7.5 dB: the track then peaked at −0.7 dBFS and the soft-knee limiter was engaged.)
+    static let lineInOBSCompensationDB: Double = 2.5
+    static let lineInOBSCompensation: Float = Float(pow(10, lineInOBSCompensationDB / 20.0))
     static func hw(_ level: Int) -> Int { Int((Double(level) / 100 * Double(AXProtocol.mixerVolumeMax)).rounded()) }
     static func ui(_ hw: Int) -> Int { min(100, hw * 100 / AXProtocol.mixerVolumeMax) }
 
@@ -55,6 +56,8 @@ final class AudioService: ObservableObject {
                 // Audience is an internal Line In bus: the physical Line In at unity (its knob is applied to
                 // the OBS copy), every other channel silent through the volume registers, never the mute bits.
                 c.send(Self.audienceRow())
+                // With sync off the firmware no longer copies the mic into the Chat Mic mix: written explicitly.
+                c.send(Self.chatMicRow())
                 continue
             }
             let mix = p.mixes[.creator] ?? MixState()
@@ -74,6 +77,11 @@ final class AudioService: ObservableObject {
     /// Audience is an internal Line In bus: the physical Line In at unity, every other channel at 0
     /// (through the volume registers). Sent on a full mixer sync (attach / resync): the controller skips it
     /// when the payload did not change.
+    /// Chat Mic mix (mixer 2, 0x35…): the mic at unity, nothing else (feeds USB in 5-6 / [AM-IN] Chat Mic).
+    static func chatMicRow() -> AXProtocol.Command {
+        AXProtocol.mixerVolumes(mixer: 2, values: [AXProtocol.mixerVolumeMax, 0, 0, 0, 0, 0])
+    }
+
     static func audienceRow() -> AXProtocol.Command {
         AXProtocol.mixerVolumes(mixer: 1, values: [0, AXProtocol.mixerVolumeMax, 0, 0, 0, 0])
     }
@@ -116,7 +124,8 @@ final class AudioService: ObservableObject {
             if muted || !p.isRouted(ch, to: .headphones) { creator |= 1 << i }
             if muted { audience |= 1 << i }
         }
-        // Monitor off: the firmware needs the mic bit in Creator to keep it out of the headphones.
+        // Monitor off: the Creator mic bit in the 0x11 masks is the only switch (0x22 stays 0x00, sync off: a
+        // sync ≠ 0 value makes the firmware copy the Creator mic into the Audience mix, i.e. into [AM-IN] Line In).
         if !hearsMic { creator |= 1 }
         // The Audience bus carries no mic: its bit mirrors the user's mic mute only.
         if micMuted(.creator) { audience |= 1 }
@@ -285,43 +294,49 @@ final class AudioService: ObservableObject {
         // Monitor (hearing your own mic in the headphones), verified on the device (PROTOCOL.md §Mic routing):
         // - the headphones listen to the Creator mix (register 0x15 = 0) and to the Chat Mic mix;
         // - register 0x22 = mic | sync<<4, mic = mixer the mic monitor goes through (0 Creator, 1 Audience,
-        //   2 Chat Mic: assumed from MIXER_MIC 0..2, PROTOCOL.md). Monitor on = 0x00 = monitor via Creator, sync off
-        //   (follows the Creator mic knob, nothing via Audience): verified by user listening test 2026-11-11. 0x01 (via Audience) still
-        //   leaked the voice into Line In and ignored the mic knob. 0x22 = 0x31 cuts the Chat Mic → headphones path
-        //   (hardware-verified, read back as 0x33) while the Chat Mic USB output keeps the voice;
-        // - sync = 1 (the former 0x12) makes the firmware copy the Creator mic volume into the Audience mix (and
-        //   clears the Audience mic mute), which leaked the voice into [AM-IN] Line In; sync = 0 keeps the Audience
-        //   mic volume at 0 (register read-back 2026-11-11);
-        // - host writes of the mic bit in 0x12 are ignored: the firmware owns the Mic knob mute in Audience.
+        //   2 Chat Mic: assumed from MIXER_MIC 0..2, PROTOCOL.md). It stays 0x00 = monitor via Creator, sync off,
+        //   in every state (follows the Creator mic knob, nothing via Audience): verified by user listening test
+        //   2026-11-11. 0x01 (via Audience) still leaked the voice into Line In and ignored the mic knob;
+        // - sync ≠ 0 is never written: 0x31 (the former "monitor off" value, mic = Audience, sync = 3) makes the
+        //   firmware copy the Creator mic volume into the Audience mix, which leaked the voice into
+        //   [AM-IN] Line In (register read-back 2026-11-12: 0x2E = 14 14 00 00 00 00 right after monitor off).
+        //   The monitor is switched with the Creator mic mute bit in the 0x11 masks only (see muteMasks);
+        // - with sync off the Chat Mic mix (0x35…, mic = index 0) is no longer fed from the knob: the app writes
+        //   it (mic 20, rest 0).
         // Monitor off (incl. a muted/routed-away mic, as enableMonitor in the reference app) = the Creator mic
-        // bit in the mute masks + 0x22 = 0x31. The mic ring is drawn by the firmware.
+        // bit in the mute masks, never a 0x22 change and never the Audience bus. The mic ring is drawn by the
+        // firmware.
         c.sendInOrder([micMonitorCommand(),
                        AXProtocol.headphoneSource(0),
                        AXProtocol.mixerMutes(muteMasks())].map { var x = $0; x.preDelayMs = 0; return x })
         c.send(AXProtocol.preampGain(MicGain.register(effectiveGainDB)))
         ledManager.update()  // also when nothing was written (cleanup switched on or off)
-        scheduleAudienceMicCheck(after: .milliseconds(1500))  // 0x22 may have changed
+        scheduleAudienceMicCheck(after: .milliseconds(1500))  // the firmware may copy the mic into Audience
     }
 
-    /// Register 0x22: 0x00 (Creator, sync 0) with the monitor on, 0x31 with it off (see applyMic).
+    /// Register 0x22: always 0x00 (monitor via the Creator mix, sync off). A sync ≠ 0 value makes the firmware
+    /// copy the Creator mic volume into the Audience mix (see applyMic); the monitor itself is switched with the
+    /// Creator mic mute bit in the 0x11 masks.
     private func micMonitorCommand() -> AXProtocol.Command {
-        hearsMic ? AXProtocol.micMonitor(mixer: 0, sync: 0) : AXProtocol.micMonitor(mixer: 1, sync: 3)
+        AXProtocol.micMonitor(mixer: 0, sync: 0)
     }
 
     private var audienceMicCheck: Task<Void, Never>?
 
-    /// Reads the Audience mic volume (0x2E[0]) after a delay (debounced) and re-sends the Audience row only
+    /// Reads the Audience mic (0x2E[0], want 0) and Chat Mic mic (0x35, want 20) after a delay (debounced); re-sends a row only
     /// when the firmware put the mic back: a write without need would reset the knob rings.
     func scheduleAudienceMicCheck(after delay: Duration) {
         audienceMicCheck?.cancel()
         audienceMicCheck = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled, let c = self.controller else { return }
-            guard let r = await c.transact(AXProtocol.read(0x2E, 1)), r.count > 4, r[4] != 0 else { return }
-            guard !Task.isCancelled, c === self.controller else { return }
-            var row = Self.audienceRow()
-            row.bypassCache = true
-            c.sendInOrder([row])
+            var rows: [AXProtocol.Command] = []
+            if let r = await c.transact(AXProtocol.read(0x2E, 1)), r.count > 4, r[4] != 0 { rows.append(Self.audienceRow()) }
+            if let r = await c.transact(AXProtocol.read(0x35, 1)), r.count > 4, Int(r[4]) != AXProtocol.mixerVolumeMax {
+                rows.append(Self.chatMicRow())
+            }
+            guard !rows.isEmpty, !Task.isCancelled, c === self.controller else { return }
+            c.sendInOrder(rows.map { var x = $0; x.bypassCache = true; return x })
         }
     }
 
@@ -546,9 +561,10 @@ final class AudioService: ObservableObject {
         let level = Self.ui(hwValue)
         store.mixer.mixes[.creator, default: MixState()].channels[ch, default: ChannelState()].level = level
         if ch == .mic { scheduleAudienceMicCheck(after: .milliseconds(500)) }
-        // The firmware has already applied the knob (volume, ring, and for the mic its own audience copy): no
-        // HID write here, a register write would make it reset and redraw the rings. The knobs drive the
-        // Creator mix unlinked, so mixer 1 cannot change and nothing in the app follows the mic fader.
+        // The firmware has already applied the knob (volume and ring): no HID write here, a register write would
+        // make it reset and redraw the rings. Hardware test 2026-11-12 (58 mic-knob events with 0x22 = 0x00): the
+        // firmware does not change 0x2E / 0x35 on knob turns, so the check above is only a safety net. The knobs
+        // drive the Creator mix unlinked, so mixer 1 cannot change and nothing in the app follows the mic fader.
     }
 
     /// A mixer knob was pressed: its channel mute flips in the Creator mix.

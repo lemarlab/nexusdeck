@@ -178,7 +178,13 @@ final class AppState: ObservableObject {
             bridge.setGain(.capLineIn, audio.captureGain(.lineIn))
             bridge.setGain(.capConsole, audio.captureGain(.console))
             // The Audience mix carries the physical Line In at unity: only the knob's share is added here.
-            // Compensate the measured ~7.5 dB deficit of the Audience→USB path (see AudioService.lineInOBSCompensationDB).
+            // Compensate the measured ~2.5 dB deficit of the Audience→USB path (see AudioService.lineInOBSCompensationDB).
+            // [AM-IN] Chat Mic follows the Creator mic knob (store level, set from the knob HID events) on the
+            // hardware volume curve, relative to the fixed unity of the Chat Mic mix: meterGain[hw] / meterGain[20].
+            let micState = mix.channels[.mic] ?? ChannelState()
+            bridge.setGain(.chatMic, micState.muted || mix.muted ? 0
+                           : Float(AudioService.meterGain[min(20, AudioService.hw(micState.level * mix.level / 100))])
+                             / Float(AudioService.meterGain[20]))
             bridge.setGain(.capLineInHW, audio.captureGain(.lineIn) * 32768 / Float(AudioService.meterGain[20]) * AudioService.lineInOBSCompensation)
         }
         engine.startIntegrations()
