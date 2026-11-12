@@ -423,7 +423,11 @@ final class AudioBridge: ObservableObject {
         // [AM-IN] Chat Mic knob gain: one-pole ramp (~20 ms) from the previous value, linear within the buffer.
         let chatFrom = plan.pointee.chatGainCur
         let chatTarget = g[Int(Gain.chatMic.rawValue)]
-        let bufFrames = Float(ins.first.map { Int($0.mDataByteSize) / 4 / max(Int($0.mNumberChannels), 1) } ?? 0)
+        // Buffer length from the Chat Mic source buffer (the one the Chat Mic routes read), not the first input.
+        let micIn = plan.pointee.fxIn.0
+        let bufFrames = Float(micIn.srcBuffer >= 0 && Int(micIn.srcBuffer) < ins.count
+                              ? Int(ins[Int(micIn.srcBuffer)].mDataByteSize) / 4 / max(Int(ins[Int(micIn.srcBuffer)].mNumberChannels), 1)
+                              : 0)
         let tau = max(plan.pointee.fx.pointee.sampleRate, 1) * 0.02
         let chatTo = chatFrom + (chatTarget - chatFrom) * min(1, bufFrames / tau)
         plan.pointee.chatGainCur = chatTo
@@ -456,7 +460,7 @@ final class AudioBridge: ObservableObject {
                   let dp = outs[Int(r.dstBuffer)].mData?.assumingMemoryBound(to: Float.self) else { continue }
             let stride = max(Int(outs[Int(r.dstBuffer)].mNumberChannels), 1)
             let frames = Int(outs[Int(r.dstBuffer)].mDataByteSize) / 4 / stride
-            let T: Float = 0.7
+            let T: Float = 0.94  // ≈ −0.5 dBFS: the curve starts there and has slope 1 at the knee (no discontinuity)
             for f in 0..<frames {
                 for c in 0..<stride {
                     let idx = f * stride + c
@@ -469,7 +473,7 @@ final class AudioBridge: ObservableObject {
             }
         }
         micPeak(plan, ins)
-        voice(plan, ins, outs, chatGain: chatTo)
+        voice(plan, ins, outs, chatFrom: chatFrom, chatTo: chatTo)
     }
 
     /// Mic peak for the scream protection (Chat Mic input, left channel).
@@ -486,7 +490,7 @@ final class AudioBridge: ObservableObject {
     /// Voice changer: mono mic from the Chat Mic input → effects → Chat Mic device (replacing the clean voice).
     /// The processed voice is published on that device only (the virtual mic OBS captures): it is never added
     /// to the mixer's Chat channel, so it is not heard in the headphones.
-    nonisolated private static func voice(_ plan: UnsafeMutablePointer<RoutePlan>, _ ins: UnsafeMutableAudioBufferListPointer, _ outs: UnsafeMutableAudioBufferListPointer, chatGain: Float) {
+    nonisolated private static func voice(_ plan: UnsafeMutablePointer<RoutePlan>, _ ins: UnsafeMutableAudioBufferListPointer, _ outs: UnsafeMutableAudioBufferListPointer, chatFrom: Float, chatTo: Float) {
         let pl = plan.pointee
         guard pl.fx.pointee.voice > 0 || VoiceFX.cleaning(pl.fx), pl.fxIn.0.srcBuffer >= 0, pl.fxIn.1.srcBuffer >= 0 else { return }
         func ptr(_ l: UnsafeMutableAudioBufferListPointer, _ r: Route) -> (UnsafeMutablePointer<Float>, Int, Int)? {
@@ -499,10 +503,11 @@ final class AudioBridge: ObservableObject {
         let buf = pl.scratch
         for f in 0..<frames { buf[f] = (l.0[f * l.1] + rr.0[f * rr.1]) * 0.5 }
         VoiceFX.process(pl.fx, buf, frames)
-        let voiceGain = pl.voiceGain * chatGain  // the mic knob applies to the processed voice too
+        // Same in-buffer ramp as the raw Chat Mic path: the mic knob applies to the processed voice too.
+        let step = frames > 1 ? (chatTo - chatFrom) / Float(frames) : 0
         for target in [pl.fxToChatMic.0, pl.fxToChatMic.1] {
             guard let o = ptr(outs, target) else { continue }
-            for f in 0..<min(frames, o.2) { o.0[f * o.1] = buf[f] * voiceGain }
+            for f in 0..<min(frames, o.2) { o.0[f * o.1] = buf[f] * pl.voiceGain * (chatFrom + step * Float(f)) }
         }
         let k = pl.fx.pointee.returnGain
         // Return to the mixer's Chat channel only when Voicemod is active (chatReturnEnabled), so the processed

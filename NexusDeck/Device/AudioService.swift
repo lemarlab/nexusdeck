@@ -302,8 +302,7 @@ final class AudioService: ObservableObject {
         //   [AM-IN] Line In (register read-back 2026-11-12: 0x2E = 14 14 00 00 00 00 right after monitor off).
         //   The monitor is switched with the Creator mic mute bit in the 0x11 masks only (see muteMasks);
         // - with sync off the Chat Mic mix (0x35…, mic = index 0) is no longer fed from the knob: the app writes
-        //   it (mic 20, rest 0). Read-back 2026-11-11: an explicit 0x35 = 0x14 persists with 0x22 = 0x00 / 0x02;
-        // - host writes of the mic bit in 0x12 are ignored: the firmware owns the Mic knob mute in Audience.
+        //   it (mic 20, rest 0).
         // Monitor off (incl. a muted/routed-away mic, as enableMonitor in the reference app) = the Creator mic
         // bit in the mute masks, never a 0x22 change and never the Audience bus. The mic ring is drawn by the
         // firmware.
@@ -562,9 +561,10 @@ final class AudioService: ObservableObject {
         let level = Self.ui(hwValue)
         store.mixer.mixes[.creator, default: MixState()].channels[ch, default: ChannelState()].level = level
         if ch == .mic { scheduleAudienceMicCheck(after: .milliseconds(500)) }
-        // The firmware has already applied the knob (volume, ring, and for the mic its own audience copy): no
-        // HID write here, a register write would make it reset and redraw the rings. The knobs drive the
-        // Creator mix unlinked, so mixer 1 cannot change and nothing in the app follows the mic fader.
+        // The firmware has already applied the knob (volume and ring): no HID write here, a register write would
+        // make it reset and redraw the rings. Hardware test 2026-11-12 (58 mic-knob events with 0x22 = 0x00): the
+        // firmware does not change 0x2E / 0x35 on knob turns, so the check above is only a safety net. The knobs
+        // drive the Creator mix unlinked, so mixer 1 cannot change and nothing in the app follows the mic fader.
     }
 
     /// A mixer knob was pressed: its channel mute flips in the Creator mix.
