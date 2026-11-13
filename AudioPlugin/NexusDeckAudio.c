@@ -517,9 +517,10 @@ static OSStatus GetPropertyData(AudioServerPlugInDriverRef inDriver, AudioObject
             case kAudioObjectPropertyOwner: WRITE(AudioObjectID, kPlugInID); return 0;
             case kAudioObjectPropertyName: {
                 pthread_mutex_lock(&gMutex);
-                // Visible devices are prefixed with their direction: "[AM-IN] Chat Mic", "[AM-OUT] System".
+                // Visible devices are prefixed with their direction symbol: "● Chat Mic" (input), "▶ System" (output).
+                // Symbols are UTF-8 (3 bytes each); full[160] covers the 4-byte prefix plus the 127-byte name.
                 char full[160];
-                snprintf(full, sizeof(full), "%s%s", dev->hidden ? "" : (dev->input ? "[AM-IN] " : "[AM-OUT] "), gNames[d][0] ? gNames[d] : dev->name);
+                snprintf(full, sizeof(full), "%s%s", dev->hidden ? "" : (dev->input ? "● " : "▶ "), gNames[d][0] ? gNames[d] : dev->name);
                 CFStringRef n = CFStr(full);
                 pthread_mutex_unlock(&gMutex);
                 if (inDataSize < sizeof(CFStringRef)) { CFRelease(n); return kAudioHardwareBadPropertySizeError; }
