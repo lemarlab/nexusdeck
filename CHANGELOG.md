@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.2 — 2026-11-13
+
+### Changed
+- Audio device names: inputs now start with ● (e.g. "● Chat Mic"), outputs with ▶ (e.g. "▶ System"), replacing "[AM-IN]" / "[AM-OUT]". Only display names changed: device IDs, routing and settings are untouched, so OBS/Discord keep their selections.
+
+### Notes
+- The new names appear after the updated audio driver is installed. The driver (NexusDeckAudio.driver) is bundled inside the app (Contents/Resources); the app installs or updates it in /Library/Audio/Plug-Ins/HAL from General settings (administrator password required) and restarts coreaudiod. Ad-hoc signed, not notarized: first launch via right-click → Open.
+
 ## 0.6.1 — 2026-11-12
 
 ### Fixed
