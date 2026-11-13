@@ -145,7 +145,7 @@ struct ActionSettingsView: View {
                 DropdownRowField(title: "Voce", selection: s.int("voice", 0),
                                  options: [(0, "Ultima scelta")] + VoiceFX.voices.enumerated().dropFirst().map { ($0.offset, $0.element.name) })
             }
-            Text("La voce filtrata arriva su [AM-IN] Chat Mic, in diretta e in cuffia con il Monitor acceso. Il tasto mostra la voce attiva.").foregroundStyle(.secondary)
+            Text("La voce filtrata arriva su ● Chat Mic, in diretta e in cuffia con il Monitor acceso. Il tasto mostra la voce attiva.").foregroundStyle(.secondary)
         case ActionID.fxPreset:
             Toggle("Riverbero", isOn: s.bool("reverb", true))
             if s.wrappedValue.bool("reverb", true) {
